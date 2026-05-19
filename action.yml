@@ -57,7 +57,7 @@ runs:
   steps:
     - name: Setup oCIS
       id: setup
-      uses: mklos-kw/ocis-github-actions/ocis-setup@v1
+      uses: mklos-kw/ocis-github-actions/ocis-setup@main
       with:
         ocis-binary: ${{ inputs.ocis-binary }}
         ocis-version: ${{ inputs.ocis-version }}
@@ -68,7 +68,7 @@ runs:
         extra-server-env: ${{ inputs.extra-server-env }}
 
     - name: Run tests
-      uses: mklos-kw/ocis-github-actions/ocis-test@v1
+      uses: mklos-kw/ocis-github-actions/ocis-test@main
       with:
         suite: ${{ inputs.suite }}
         ocis-url: ${{ steps.setup.outputs.ocis-url }}
