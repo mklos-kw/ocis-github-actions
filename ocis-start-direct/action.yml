@@ -1,7 +1,10 @@
-name: ocis-start-direct
-description: >
-  Start oCIS directly (ocis server, no ociswrapper) with Docker bridge IP as OCIS_URL
-  so Docker containers can reach the host-side oCIS process.
+name: 'oCIS Start Direct'
+author: 'ownCloud'
+description: 'Start oCIS directly (ocis server, no ociswrapper) with Docker bridge IP as OCIS_URL so Docker containers can reach the host-side oCIS process.'
+
+branding:
+  icon: 'play-circle'
+  color: 'blue'
 
 inputs:
   ocis-binary:

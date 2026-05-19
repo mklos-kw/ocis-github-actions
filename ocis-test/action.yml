@@ -1,5 +1,10 @@
-name: ocis-test
-description: Run oCIS Behat acceptance tests against a running oCIS instance
+name: 'oCIS Test'
+author: 'ownCloud'
+description: 'Run oCIS Behat acceptance tests against a running oCIS instance.'
+
+branding:
+  icon: 'check-circle'
+  color: 'blue'
 
 inputs:
   suite:

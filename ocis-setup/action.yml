@@ -1,5 +1,10 @@
-name: ocis-setup
-description: Start an oCIS instance with optional services (antivirus, email, tika, ociswrapper)
+name: 'oCIS Setup'
+author: 'ownCloud'
+description: 'Start an oCIS instance with optional services (antivirus, email, tika, ociswrapper).'
+
+branding:
+  icon: 'server'
+  color: 'blue'
 
 inputs:
   ocis-version:

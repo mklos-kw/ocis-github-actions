@@ -1,0 +1,14 @@
+name: Lint
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  actionlint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Lint action files
+        uses: rhysd/actionlint@v1
