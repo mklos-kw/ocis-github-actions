@@ -1,0 +1,76 @@
+name: 'oCIS Acceptance Tests'
+author: 'ownCloud'
+description: 'Set up an oCIS instance and run Behat acceptance tests. Combines ocis-setup and ocis-test.'
+
+branding:
+  icon: 'cloud'
+  color: 'blue'
+
+inputs:
+  ocis-binary:
+    description: 'Path to a pre-built oCIS binary. When omitted, ocis-version is downloaded.'
+    required: false
+    default: ''
+  ocis-version:
+    description: 'oCIS release version (e.g. 8.0.1) or "latest". Ignored when ocis-binary is set.'
+    required: false
+    default: latest
+  suite:
+    description: 'Behat suite(s) to run, comma-separated (e.g. apiGraph or apiAntivirus,apiSettings).'
+    required: true
+  demo-users:
+    description: 'Create demo users (IDM_CREATE_DEMO_USERS=true).'
+    required: false
+    default: 'false'
+  email:
+    description: 'Start Mailpit SMTP (:1025) and API (:8025).'
+    required: false
+    default: 'false'
+  tika:
+    description: 'Start Apache Tika on :9998 for full-text search.'
+    required: false
+    default: 'false'
+  antivirus:
+    description: 'Start ClamAV on :3310 and enable postprocessing.'
+    required: false
+    default: 'false'
+  extra-server-env:
+    description: 'JSON object of additional env vars to pass to the oCIS server.'
+    required: false
+    default: '{}'
+  expected-failures-file:
+    description: 'Path to expected failures markdown (relative to repo root).'
+    required: false
+    default: ''
+  acceptance-test-type:
+    description: 'Test type passed as ACCEPTANCE_TEST_TYPE (api or core-api).'
+    required: false
+    default: api
+
+outputs:
+  ocis-url:
+    description: 'oCIS instance URL'
+    value: ${{ steps.setup.outputs.ocis-url }}
+
+runs:
+  using: composite
+  steps:
+    - name: Setup oCIS
+      id: setup
+      uses: mklos-kw/ocis-github-actions/ocis-setup@v1
+      with:
+        ocis-binary: ${{ inputs.ocis-binary }}
+        ocis-version: ${{ inputs.ocis-version }}
+        demo-users: ${{ inputs.demo-users }}
+        email: ${{ inputs.email }}
+        tika: ${{ inputs.tika }}
+        antivirus: ${{ inputs.antivirus }}
+        extra-server-env: ${{ inputs.extra-server-env }}
+
+    - name: Run tests
+      uses: mklos-kw/ocis-github-actions/ocis-test@v1
+      with:
+        suite: ${{ inputs.suite }}
+        ocis-url: ${{ steps.setup.outputs.ocis-url }}
+        expected-failures-file: ${{ inputs.expected-failures-file }}
+        acceptance-test-type: ${{ inputs.acceptance-test-type }}

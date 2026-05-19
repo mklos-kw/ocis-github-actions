@@ -1,0 +1,35 @@
+name: Bug Report
+description: Report a problem with one of the oCIS actions
+labels: [bug]
+body:
+  - type: dropdown
+    id: action
+    attributes:
+      label: Which action is affected?
+      options:
+        - ocis-setup
+        - ocis-start-direct
+        - ocis-test
+        - root (combined)
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Action version
+      placeholder: 'e.g. v1.0.0 or @main'
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Include the relevant step output and any error messages.
+    validations:
+      required: true
+  - type: textarea
+    id: workflow
+    attributes:
+      label: Workflow snippet
+      description: The job/step configuration that triggers the issue.
+      render: yaml

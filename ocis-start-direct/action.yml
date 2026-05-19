@@ -1,0 +1,145 @@
+name: 'oCIS Start Direct'
+author: 'ownCloud'
+description: 'Start oCIS directly (ocis server, no ociswrapper) with Docker bridge IP as OCIS_URL so Docker containers can reach the host-side oCIS process.'
+
+branding:
+  icon: 'play-circle'
+  color: 'blue'
+
+inputs:
+  ocis-binary:
+    description: Path to a pre-built oCIS binary
+    required: true
+  demo-users:
+    description: Create demo users (IDM_CREATE_DEMO_USERS)
+    required: false
+    default: "false"
+  exclude-services:
+    description: OCIS_EXCLUDE_RUN_SERVICES value
+    required: false
+    default: "idp"
+  extra-server-env:
+    description: JSON object of additional env vars to pass to the oCIS server
+    required: false
+    default: "{}"
+
+outputs:
+  bridge-ip:
+    description: Docker bridge gateway IP (reachable from host and containers)
+    value: ${{ steps.bridge.outputs.bridge-ip }}
+  ocis-url:
+    description: oCIS URL using bridge IP
+    value: ${{ steps.bridge.outputs.ocis-url }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install oCIS binary
+      shell: bash
+      run: |
+        sudo cp "${{ inputs.ocis-binary }}" /usr/local/bin/ocis
+        sudo chmod +x /usr/local/bin/ocis
+
+    - name: Get Docker bridge IP
+      id: bridge
+      shell: bash
+      run: |
+        BRIDGE_IP=$(docker network inspect bridge \
+          --format '{{range .IPAM.Config}}{{.Gateway}}{{end}}')
+        echo "bridge-ip=${BRIDGE_IP}" >> "$GITHUB_OUTPUT"
+        echo "ocis-url=https://${BRIDGE_IP}:9200" >> "$GITHUB_OUTPUT"
+        echo "OCIS_BRIDGE_IP=${BRIDGE_IP}" >> "$GITHUB_ENV"
+        echo "Docker bridge IP: ${BRIDGE_IP}"
+
+    - name: Init oCIS
+      shell: bash
+      env:
+        EXTRA_SERVER_ENV: ${{ inputs.extra-server-env }}
+        DEMO_USERS: ${{ inputs.demo-users }}
+        EXCLUDE_SERVICES: ${{ inputs.exclude-services }}
+        WORKSPACE: ${{ github.workspace }}
+      run: |
+        CONFIG_DIR="${HOME}/.ocis/config"
+        mkdir -p "$CONFIG_DIR"
+        OCIS_URL="https://${OCIS_BRIDGE_IP}:9200"
+
+        EXTRA_ENV=(
+          "OCIS_URL=${OCIS_URL}"
+          "OCIS_CONFIG_DIR=${CONFIG_DIR}"
+          "STORAGE_USERS_DRIVER=ocis"
+          "PROXY_ENABLE_BASIC_AUTH=true"
+          "OCIS_EXCLUDE_RUN_SERVICES=${EXCLUDE_SERVICES}"
+          "OCIS_LOG_LEVEL=error"
+          "IDM_CREATE_DEMO_USERS=${DEMO_USERS}"
+          "IDM_ADMIN_PASSWORD=admin"
+          "FRONTEND_SEARCH_MIN_LENGTH=2"
+          "OCIS_ASYNC_UPLOADS=true"
+          "OCIS_EVENTS_ENABLE_TLS=false"
+          "NATS_NATS_HOST=0.0.0.0"
+          "NATS_NATS_PORT=9233"
+          "OCIS_JWT_SECRET=some-ocis-jwt-secret"
+          "EVENTHISTORY_STORE=memory"
+          "WEB_UI_CONFIG_FILE=${WORKSPACE}/tests/config/ci/ocis-config.json"
+        )
+
+        if [[ -n "$EXTRA_SERVER_ENV" && "$EXTRA_SERVER_ENV" != "{}" ]]; then
+          while IFS= read -r pair; do
+            EXTRA_ENV+=("$pair")
+          done < <(echo "$EXTRA_SERVER_ENV" | jq -r 'to_entries[] | "\(.key)=\(.value)"')
+        fi
+
+        env "${EXTRA_ENV[@]}" ocis init --insecure true
+        cp "${WORKSPACE}/tests/config/ci/app-registry.yaml" "${CONFIG_DIR}/app-registry.yaml"
+
+    - name: Start oCIS server
+      shell: bash
+      env:
+        EXTRA_SERVER_ENV: ${{ inputs.extra-server-env }}
+        DEMO_USERS: ${{ inputs.demo-users }}
+        EXCLUDE_SERVICES: ${{ inputs.exclude-services }}
+        WORKSPACE: ${{ github.workspace }}
+      run: |
+        CONFIG_DIR="${HOME}/.ocis/config"
+        OCIS_URL="https://${OCIS_BRIDGE_IP}:9200"
+
+        EXTRA_ENV=(
+          "OCIS_URL=${OCIS_URL}"
+          "OCIS_CONFIG_DIR=${CONFIG_DIR}"
+          "STORAGE_USERS_DRIVER=ocis"
+          "PROXY_ENABLE_BASIC_AUTH=true"
+          "OCIS_EXCLUDE_RUN_SERVICES=${EXCLUDE_SERVICES}"
+          "OCIS_LOG_LEVEL=error"
+          "IDM_CREATE_DEMO_USERS=${DEMO_USERS}"
+          "IDM_ADMIN_PASSWORD=admin"
+          "FRONTEND_SEARCH_MIN_LENGTH=2"
+          "OCIS_ASYNC_UPLOADS=true"
+          "OCIS_EVENTS_ENABLE_TLS=false"
+          "NATS_NATS_HOST=0.0.0.0"
+          "NATS_NATS_PORT=9233"
+          "OCIS_JWT_SECRET=some-ocis-jwt-secret"
+          "EVENTHISTORY_STORE=memory"
+          "WEB_UI_CONFIG_FILE=${WORKSPACE}/tests/config/ci/ocis-config.json"
+        )
+
+        if [[ -n "$EXTRA_SERVER_ENV" && "$EXTRA_SERVER_ENV" != "{}" ]]; then
+          while IFS= read -r pair; do
+            EXTRA_ENV+=("$pair")
+          done < <(echo "$EXTRA_SERVER_ENV" | jq -r 'to_entries[] | "\(.key)=\(.value)"')
+        fi
+
+        env "${EXTRA_ENV[@]}" ocis server > /tmp/ocis-direct.log 2>&1 &
+        echo $! > /tmp/ocis-direct.pid
+        echo "oCIS started (PID $(cat /tmp/ocis-direct.pid)), log: /tmp/ocis-direct.log"
+
+    - name: Wait for oCIS
+      shell: bash
+      run: |
+        echo "Waiting for oCIS at https://localhost:9200..."
+        timeout 300 bash -c '
+          until curl -sk -uadmin:admin https://localhost:9200/graph/v1.0/users/admin \
+                -w "%{http_code}" -o /dev/null 2>/dev/null | grep -q "200"; do
+            sleep 2
+          done
+        ' || (echo "=== oCIS failed to start ===" && \
+               cat /tmp/ocis-direct.log 2>/dev/null | tail -50 && exit 1)
+        echo "ocis ready."
