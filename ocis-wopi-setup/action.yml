@@ -1,0 +1,200 @@
+name: 'oCIS WOPI Setup'
+author: 'ownCloud'
+description: 'Start oCIS with a WOPI server (builtin collaboration service or cs3org/wopiserver) for WOPI validator tests.'
+
+branding:
+  icon: 'file-text'
+  color: 'blue'
+
+inputs:
+  ocis-binary:
+    description: Path to a pre-built oCIS binary
+    required: true
+  server-type:
+    description: 'WOPI server type: builtin (collaboration service) or cs3 (cs3org/wopiserver)'
+    required: false
+    default: builtin
+  cs3-wopi-image:
+    description: cs3org/wopiserver image (used when server-type=cs3)
+    required: false
+    default: cs3org/wopiserver:v10.4.0
+  fakeoffice-image:
+    description: Image used to serve hosting-discovery.xml
+    required: false
+    default: owncloudci/alpine:latest
+
+outputs:
+  bridge-ip:
+    description: Docker bridge gateway IP (reachable from host and containers)
+    value: ${{ steps.bridge.outputs.bridge-ip }}
+  ocis-url:
+    description: oCIS URL using bridge IP
+    value: ${{ steps.bridge.outputs.ocis-url }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install oCIS binary
+      shell: bash
+      run: |
+        sudo cp "${{ inputs.ocis-binary }}" /usr/local/bin/ocis
+        sudo chmod +x /usr/local/bin/ocis
+
+    - name: Get Docker bridge IP
+      id: bridge
+      shell: bash
+      run: |
+        BRIDGE_IP=$(docker network inspect bridge \
+          --format '{{range .IPAM.Config}}{{.Gateway}}{{end}}')
+        echo "bridge-ip=${BRIDGE_IP}" >> "$GITHUB_OUTPUT"
+        echo "ocis-url=https://${BRIDGE_IP}:9200" >> "$GITHUB_OUTPUT"
+        echo "OCIS_BRIDGE_IP=${BRIDGE_IP}" >> "$GITHUB_ENV"
+
+    - name: Start fakeoffice
+      shell: bash
+      run: |
+        docker run -d --name wopi-fakeoffice \
+          -p 8080:8080 \
+          -v "${{ github.workspace }}:/ocis:ro" \
+          "${{ inputs.fakeoffice-image }}" \
+          sh /ocis/tests/config/ci/serve-hosting-discovery.sh
+        timeout 60 bash -c 'until curl -sf http://localhost:8080/hosting/discovery; do sleep 2; done'
+        echo "fakeoffice ready."
+
+    - name: Init oCIS
+      shell: bash
+      run: |
+        CONFIG_DIR="${HOME}/.ocis/config"
+        mkdir -p "$CONFIG_DIR"
+        BRIDGE_IP="${OCIS_BRIDGE_IP}"
+        OCIS_URL="https://${BRIDGE_IP}:9200"
+        EXCLUDE="idp,app-provider"
+        if [[ "${{ inputs.server-type }}" == "cs3" ]]; then
+          EXCLUDE="idp"
+        fi
+        env \
+          OCIS_URL="$OCIS_URL" \
+          OCIS_CONFIG_DIR="$CONFIG_DIR" \
+          STORAGE_USERS_DRIVER=ocis \
+          PROXY_ENABLE_BASIC_AUTH=true \
+          OCIS_EXCLUDE_RUN_SERVICES="$EXCLUDE" \
+          OCIS_LOG_LEVEL=error \
+          IDM_CREATE_DEMO_USERS=true \
+          IDM_ADMIN_PASSWORD=admin \
+          FRONTEND_SEARCH_MIN_LENGTH=2 \
+          OCIS_ASYNC_UPLOADS=true \
+          OCIS_EVENTS_ENABLE_TLS=false \
+          NATS_NATS_HOST=0.0.0.0 \
+          NATS_NATS_PORT=9233 \
+          OCIS_JWT_SECRET=some-ocis-jwt-secret \
+          EVENTHISTORY_STORE=memory \
+          GATEWAY_GRPC_ADDR=0.0.0.0:9142 \
+          APP_PROVIDER_EXTERNAL_ADDR=com.owncloud.api.app-provider \
+          APP_PROVIDER_DRIVER=wopi \
+          APP_PROVIDER_WOPI_APP_NAME=FakeOffice \
+          APP_PROVIDER_WOPI_APP_URL="http://${BRIDGE_IP}:8080" \
+          APP_PROVIDER_WOPI_INSECURE=true \
+          APP_PROVIDER_WOPI_WOPI_SERVER_EXTERNAL_URL="http://${BRIDGE_IP}:9300" \
+          APP_PROVIDER_WOPI_FOLDER_URL_BASE_URL="$OCIS_URL" \
+          WEB_UI_CONFIG_FILE="${{ github.workspace }}/tests/config/ci/ocis-config.json" \
+          ocis init --insecure true
+        cp "${{ github.workspace }}/tests/config/ci/app-registry.yaml" "$CONFIG_DIR/app-registry.yaml"
+
+    - name: Start oCIS
+      shell: bash
+      run: |
+        CONFIG_DIR="${HOME}/.ocis/config"
+        BRIDGE_IP="${OCIS_BRIDGE_IP}"
+        OCIS_URL="https://${BRIDGE_IP}:9200"
+        EXCLUDE="idp,app-provider"
+        if [[ "${{ inputs.server-type }}" == "cs3" ]]; then
+          EXCLUDE="idp"
+        fi
+        env \
+          OCIS_URL="$OCIS_URL" \
+          OCIS_CONFIG_DIR="$CONFIG_DIR" \
+          STORAGE_USERS_DRIVER=ocis \
+          PROXY_ENABLE_BASIC_AUTH=true \
+          OCIS_EXCLUDE_RUN_SERVICES="$EXCLUDE" \
+          OCIS_LOG_LEVEL=error \
+          IDM_CREATE_DEMO_USERS=true \
+          IDM_ADMIN_PASSWORD=admin \
+          FRONTEND_SEARCH_MIN_LENGTH=2 \
+          OCIS_ASYNC_UPLOADS=true \
+          OCIS_EVENTS_ENABLE_TLS=false \
+          NATS_NATS_HOST=0.0.0.0 \
+          NATS_NATS_PORT=9233 \
+          OCIS_JWT_SECRET=some-ocis-jwt-secret \
+          EVENTHISTORY_STORE=memory \
+          GATEWAY_GRPC_ADDR=0.0.0.0:9142 \
+          APP_PROVIDER_EXTERNAL_ADDR=com.owncloud.api.app-provider \
+          APP_PROVIDER_DRIVER=wopi \
+          APP_PROVIDER_WOPI_APP_NAME=FakeOffice \
+          APP_PROVIDER_WOPI_APP_URL="http://${BRIDGE_IP}:8080" \
+          APP_PROVIDER_WOPI_INSECURE=true \
+          APP_PROVIDER_WOPI_WOPI_SERVER_EXTERNAL_URL="http://${BRIDGE_IP}:9300" \
+          APP_PROVIDER_WOPI_FOLDER_URL_BASE_URL="$OCIS_URL" \
+          WEB_UI_CONFIG_FILE="${{ github.workspace }}/tests/config/ci/ocis-config.json" \
+          ocis server > /tmp/ocis-direct.log 2>&1 &
+        echo $! > /tmp/ocis-direct.pid
+
+    - name: Wait for oCIS
+      shell: bash
+      run: |
+        echo "Waiting for oCIS..."
+        timeout 300 bash -c '
+          until curl -sk -uadmin:admin https://localhost:9200/graph/v1.0/users/admin \
+                -w "%{http_code}" -o /dev/null 2>/dev/null | grep -q "200"; do
+            sleep 2
+          done
+        ' || (echo "=== oCIS failed to start ===" && cat /tmp/ocis-direct.log | tail -50 && exit 1)
+        echo "ocis ready."
+
+    - name: Start collaboration service (builtin)
+      if: inputs.server-type == 'builtin'
+      shell: bash
+      run: |
+        CONFIG_DIR="${HOME}/.ocis/config"
+        BRIDGE_IP="${OCIS_BRIDGE_IP}"
+        env \
+          OCIS_URL="https://${BRIDGE_IP}:9200" \
+          OCIS_CONFIG_DIR="$CONFIG_DIR" \
+          MICRO_REGISTRY=nats-js-kv \
+          MICRO_REGISTRY_ADDRESS="127.0.0.1:9233" \
+          COLLABORATION_LOG_LEVEL=debug \
+          COLLABORATION_GRPC_ADDR=0.0.0.0:9301 \
+          COLLABORATION_HTTP_ADDR=0.0.0.0:9300 \
+          COLLABORATION_DEBUG_ADDR=0.0.0.0:9304 \
+          COLLABORATION_APP_PROOF_DISABLE=true \
+          COLLABORATION_APP_INSECURE=true \
+          COLLABORATION_CS3API_DATAGATEWAY_INSECURE=true \
+          OCIS_JWT_SECRET=some-ocis-jwt-secret \
+          COLLABORATION_WOPI_SECRET=some-wopi-secret \
+          COLLABORATION_APP_NAME=FakeOffice \
+          COLLABORATION_APP_PRODUCT=Microsoft \
+          COLLABORATION_APP_ADDR="http://${BRIDGE_IP}:8080" \
+          COLLABORATION_WOPI_SRC="http://${BRIDGE_IP}:9300" \
+          ocis collaboration server > /tmp/collab-wopi.log 2>&1 &
+        echo $! > /tmp/collab-wopi.pid
+        timeout 120 bash -c 'until curl -sf http://localhost:9304/healthz; do sleep 2; done' \
+          || (echo "=== collaboration log ===" && cat /tmp/collab-wopi.log | tail -30 && exit 1)
+        echo "collaboration service ready."
+
+    - name: Start cs3org/wopiserver (cs3)
+      if: inputs.server-type == 'cs3'
+      shell: bash
+      run: |
+        BRIDGE_IP="${OCIS_BRIDGE_IP}"
+        CONF_TMP=/tmp/wopiserver-patched.conf
+        SECRET_TMP=/tmp/wopisecret
+        sed "s|ocis-server|${BRIDGE_IP}|g" \
+          "${{ github.workspace }}/tests/config/ci/wopiserver.conf" > "$CONF_TMP"
+        echo "123" > "$SECRET_TMP"
+        docker run -d --name wopi-cs3server \
+          -p 9300:9300 \
+          -v "${CONF_TMP}:/etc/wopi/wopiserver.conf:ro" \
+          -v "${SECRET_TMP}:/etc/wopi/wopisecret:ro" \
+          --entrypoint /app/wopiserver.py \
+          "${{ inputs.cs3-wopi-image }}"
+        timeout 120 bash -c "until curl -sf http://localhost:9300; do sleep 2; done" || true
+        echo "cs3 wopi server ready."
