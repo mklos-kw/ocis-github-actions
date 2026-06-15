@@ -43,6 +43,10 @@ inputs:
     description: Start ClamAV on :3310 and enable postprocessing
     required: false
     default: "false"
+  keycloak:
+    description: Configure oCIS to use an external Keycloak IdP (requires Keycloak already running on :8443)
+    required: false
+    default: "false"
   extra-server-env:
     description: JSON object of additional env vars to pass to the oCIS server
     required: false
@@ -209,6 +213,7 @@ runs:
         ANTIVIRUS_ENABLED: ${{ inputs.antivirus }}
         EMAIL_ENABLED: ${{ inputs.email }}
         TIKA_ENABLED: ${{ inputs.tika }}
+        KEYCLOAK_ENABLED: ${{ inputs.keycloak }}
         EXTRA_SERVER_ENV: ${{ inputs.extra-server-env }}
         OCIS_REPO_ROOT: ${{ github.workspace }}
       run: ${{ github.action_path }}/scripts/start-ocis.sh
@@ -218,14 +223,26 @@ runs:
     # -------------------------------------------------------------------------
     - name: Wait for oCIS
       shell: bash
+      env:
+        KEYCLOAK_ENABLED: ${{ inputs.keycloak }}
       run: |
         echo "Waiting for oCIS at https://localhost:9200..."
-        timeout 300 bash -c '
-          until curl -sk -uadmin:admin https://localhost:9200/graph/v1.0/users/admin \
-                -w "%{http_code}" -o /dev/null 2>/dev/null | grep -q "200"; do
-            sleep 2
-          done
-        ' || (echo "=== oCIS failed to start ===" && \
-               cat /tmp/ocis-server.log 2>/dev/null | tail -50 && exit 1)
+        if [[ "${KEYCLOAK_ENABLED}" == "true" ]]; then
+          # No local admin user in keycloak mode; check openid-configuration instead
+          timeout 300 bash -c '
+            until curl -sk https://localhost:9200/.well-known/openid-configuration \
+                  -w "%{http_code}" -o /dev/null 2>/dev/null | grep -q "200"; do
+              sleep 2
+            done
+          ' || (echo "=== oCIS failed to start ===" && \
+                 cat /tmp/ocis-server.log 2>/dev/null | tail -50 && exit 1)
+        else
+          timeout 300 bash -c '
+            until curl -sk -uadmin:admin https://localhost:9200/graph/v1.0/users/admin \
+                  -w "%{http_code}" -o /dev/null 2>/dev/null | grep -q "200"; do
+              sleep 2
+            done
+          ' || (echo "=== oCIS failed to start ===" && \
+                 cat /tmp/ocis-server.log 2>/dev/null | tail -50 && exit 1)
+        fi
         echo "ocis ready."
-
