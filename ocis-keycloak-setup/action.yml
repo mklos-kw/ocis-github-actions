@@ -1,35 +1,32 @@
 name: 'oCIS Keycloak Setup'
-author: 'ownCloud'
-description: 'Start Keycloak (with Postgres) for oCIS e2e tests.'
+author: 'mklos-kw'
+description: 'Start a Keycloak + Postgres stack for oCIS external IDP testing.'
 
 branding:
   icon: 'key'
   color: 'blue'
 
 inputs:
-  realm-file:
-    description: Path to the Keycloak realm JSON file
-    required: false
-    default: tests/config/ci/ocis-ci-realm.dist.json
-  ocis-url:
-    description: oCIS URL to patch into the realm file
+  ocis-domain:
+    description: oCIS URL to embed in the realm file (replaces ocis-server:9200 placeholder)
     required: false
     default: https://127.0.0.1:9200
-  keycloak-version:
-    description: Keycloak image tag
+  realm-dist-file:
+    description: Path to ocis-ci-realm.dist.json relative to repo root
     required: false
-    default: "26.2.5"
+    default: tests/config/ci/ocis-ci-realm.dist.json
 
 outputs:
-  keycloak-url:
-    description: Keycloak base URL
-    value: https://localhost:8443
+  keycloak-domain:
+    description: Keycloak domain (host:port)
+    value: localhost:8443
 
 runs:
   using: composite
   steps:
-    - name: Generate Keycloak certs
+    - name: Generate Keycloak TLS certs
       shell: bash
+      working-directory: ${{ github.workspace }}
       run: |
         mkdir -p keycloak-certs
         openssl req -x509 -newkey rsa:2048 \
@@ -47,14 +44,19 @@ runs:
           -e POSTGRES_PASSWORD=keycloak \
           postgres:alpine3.18
         timeout 30 bash -c 'until docker exec postgres pg_isready -U keycloak; do sleep 1; done'
+        echo "postgres ready."
 
-    - name: Start Keycloak
+    - name: Patch realm file and start Keycloak
       shell: bash
+      working-directory: ${{ github.workspace }}
+      env:
+        OCIS_DOMAIN: ${{ inputs.ocis-domain }}
+        REALM_DIST: ${{ inputs.realm-dist-file }}
       run: |
-        sed 's|https://ocis-server:9200|${{ inputs.ocis-url }}|g' \
-          "${{ github.workspace }}/${{ inputs.realm-file }}" > /tmp/ocis-realm.json
+        sed "s|https://ocis-server:9200|${OCIS_DOMAIN}|g" "${REALM_DIST}" > /tmp/ocis-realm.json
+
         docker run -d --name keycloak --network host \
-          -e "OCIS_DOMAIN=${{ inputs.ocis-url }}" \
+          -e "OCIS_DOMAIN=${OCIS_DOMAIN}" \
           -e KC_HOSTNAME=localhost \
           -e KC_PORT=8443 \
           -e KC_DB=postgres \
@@ -66,12 +68,13 @@ runs:
           -e KC_BOOTSTRAP_ADMIN_PASSWORD=admin \
           -e KC_HTTPS_CERTIFICATE_FILE=/keycloak-certs/keycloakcrt.pem \
           -e KC_HTTPS_CERTIFICATE_KEY_FILE=/keycloak-certs/keycloakkey.pem \
-          -v "${{ github.workspace }}/keycloak-certs:/keycloak-certs:ro" \
+          -v "$(pwd)/keycloak-certs:/keycloak-certs:ro" \
           -v "/tmp/ocis-realm.json:/opt/keycloak/data/import/oCIS-realm.json:ro" \
-          "quay.io/keycloak/keycloak:${{ inputs.keycloak-version }}" \
+          quay.io/keycloak/keycloak:26.2.5 \
           start-dev --proxy-headers xforwarded \
             --spi-connections-http-client-default-disable-trust-manager=true \
             --import-realm --health-enabled=true
+
         timeout 300 bash -c 'until curl -skf https://localhost:9000/health/ready; do sleep 3; done' \
           || (echo "=== keycloak logs ===" && docker logs keycloak --tail 80 && exit 1)
         echo "keycloak ready."

@@ -1,5 +1,5 @@
 name: 'oCIS Acceptance Tests'
-author: 'ownCloud'
+author: 'mklos-kw'
 description: 'Set up an oCIS instance and run Behat acceptance tests. Combines ocis-setup and ocis-test.'
 
 branding:

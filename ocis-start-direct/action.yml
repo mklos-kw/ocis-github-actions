@@ -1,5 +1,5 @@
 name: 'oCIS Start Direct'
-author: 'ownCloud'
+author: 'mklos-kw'
 description: 'Start oCIS directly (ocis server, no ociswrapper) with Docker bridge IP as OCIS_URL so Docker containers can reach the host-side oCIS process.'
 
 branding:

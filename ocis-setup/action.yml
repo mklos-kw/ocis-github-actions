@@ -1,5 +1,5 @@
 name: 'oCIS Setup'
-author: 'ownCloud'
+author: 'mklos-kw'
 description: 'Start an oCIS instance with optional services (antivirus, email, tika, ociswrapper).'
 
 branding:
@@ -43,14 +43,14 @@ inputs:
     description: Start ClamAV on :3310 and enable postprocessing
     required: false
     default: "false"
-  keycloak:
-    description: Configure oCIS to use an external Keycloak IdP (requires Keycloak already running on :8443)
-    required: false
-    default: "false"
   extra-server-env:
     description: JSON object of additional env vars to pass to the oCIS server
     required: false
     default: "{}"
+  keycloak:
+    description: Start oCIS with Keycloak as external IDP (uses ocis server directly, skips ociswrapper)
+    required: false
+    default: "false"
 
 outputs:
   ocis-url:
@@ -227,8 +227,7 @@ runs:
         KEYCLOAK_ENABLED: ${{ inputs.keycloak }}
       run: |
         echo "Waiting for oCIS at https://localhost:9200..."
-        if [[ "${KEYCLOAK_ENABLED}" == "true" ]]; then
-          # No local admin user in keycloak mode; check openid-configuration instead
+        if [[ "${KEYCLOAK_ENABLED:-false}" == "true" ]]; then
           timeout 300 bash -c '
             until curl -sk https://localhost:9200/.well-known/openid-configuration \
                   -w "%{http_code}" -o /dev/null 2>/dev/null | grep -q "200"; do
@@ -246,3 +245,4 @@ runs:
                  cat /tmp/ocis-server.log 2>/dev/null | tail -50 && exit 1)
         fi
         echo "ocis ready."
+
