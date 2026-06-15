@@ -7,7 +7,7 @@ set -euo pipefail
 #
 # Environment variables set by action.yml:
 #   ADMIN_PASSWORD, LOG_LEVEL, DEMO_USERS
-#   ANTIVIRUS_ENABLED, EMAIL_ENABLED, TIKA_ENABLED
+#   ANTIVIRUS_ENABLED, EMAIL_ENABLED, TIKA_ENABLED, KEYCLOAK_ENABLED
 #   EXTRA_SERVER_ENV (JSON object)
 #   OCIS_REPO_ROOT (GITHUB_WORKSPACE — needed for config file paths)
 
@@ -105,6 +105,24 @@ if [[ "${TIKA_ENABLED:-false}" == "true" ]]; then
   SERVER_ENV[SEARCH_EXTRACTOR_TYPE]="tika"
   SERVER_ENV[SEARCH_EXTRACTOR_TIKA_TIKA_URL]="http://localhost:9998"
   SERVER_ENV[SEARCH_EXTRACTOR_CS3SOURCE_INSECURE]="true"
+fi
+
+# Keycloak (external IdP)
+if [[ "${KEYCLOAK_ENABLED:-false}" == "true" ]]; then
+  SERVER_ENV[OCIS_EXCLUDE_RUN_SERVICES]="idp"
+  SERVER_ENV[PROXY_AUTOPROVISION_ACCOUNTS]="true"
+  SERVER_ENV[PROXY_ROLE_ASSIGNMENT_DRIVER]="oidc"
+  SERVER_ENV[OCIS_OIDC_ISSUER]="https://localhost:8443/realms/oCIS"
+  SERVER_ENV[PROXY_OIDC_REWRITE_WELLKNOWN]="true"
+  SERVER_ENV[WEB_OIDC_CLIENT_ID]="web"
+  SERVER_ENV[PROXY_USER_OIDC_CLAIM]="preferred_username"
+  SERVER_ENV[PROXY_USER_CS3_CLAIM]="username"
+  SERVER_ENV[OCIS_ADMIN_USER_ID]=""
+  SERVER_ENV[GRAPH_ASSIGN_DEFAULT_USER_ROLE]="false"
+  SERVER_ENV[GRAPH_USERNAME_MATCH]="none"
+  SERVER_ENV[PROXY_CSP_CONFIG_FILE_LOCATION]="${REPO_ROOT}/tests/config/ci/csp.yaml"
+  SERVER_ENV[KEYCLOAK_DOMAIN]="localhost:8443"
+  SERVER_ENV[IDM_CREATE_DEMO_USERS]="false"
 fi
 
 # Extra env vars from JSON input — use null-delimited records to handle values with '=' or newlines
