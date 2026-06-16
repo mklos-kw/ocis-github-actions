@@ -51,11 +51,15 @@ inputs:
     description: Start oCIS with Keycloak as external IDP (uses ocis server directly, skips ociswrapper)
     required: false
     default: "false"
+  ocis-url:
+    description: oCIS base URL used for init and server startup (use https://127.0.0.1:9200 for e2e tests)
+    required: false
+    default: "https://localhost:9200"
 
 outputs:
   ocis-url:
     description: oCIS instance URL
-    value: https://localhost:9200
+    value: ${{ inputs.ocis-url }}
 
 runs:
   using: composite
@@ -199,6 +203,7 @@ runs:
       shell: bash
       env:
         OCIS_ACTION_PATH: ${{ github.action_path }}
+        OCIS_URL: ${{ inputs.ocis-url }}
       run: ${{ github.action_path }}/scripts/init-ocis.sh
 
     # -------------------------------------------------------------------------
@@ -216,6 +221,7 @@ runs:
         KEYCLOAK_ENABLED: ${{ inputs.keycloak }}
         EXTRA_SERVER_ENV: ${{ inputs.extra-server-env }}
         OCIS_REPO_ROOT: ${{ github.workspace }}
+        OCIS_URL_OVERRIDE: ${{ inputs.ocis-url }}
       run: ${{ github.action_path }}/scripts/start-ocis.sh
 
     # -------------------------------------------------------------------------
