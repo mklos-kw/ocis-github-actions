@@ -8,7 +8,7 @@ set -euo pipefail
 CONFIG_DIR="${HOME}/.ocis/config"
 mkdir -p "$CONFIG_DIR"
 
-ocis init --insecure true
+OCIS_URL="${OCIS_URL:-https://localhost:9200}" ocis init --insecure true
 
 # app-registry.yaml: bundled with this action so it works without a repo checkout
 cp "${OCIS_ACTION_PATH}/config/app-registry.yaml" "${CONFIG_DIR}/app-registry.yaml"
