@@ -1,24 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Start oCIS via ociswrapper (default) or directly (keycloak mode).
-# ociswrapper wraps the ocis binary and exposes HTTP API on :5200
-# for dynamic reconfiguration (env var changes at runtime).
-# Keycloak mode: ociswrapper health-check API is incompatible with an external IDP,
-# so we start `ocis server` directly and exclude the built-in IDP service.
-#
-# Environment variables set by action.yml:
-#   ADMIN_PASSWORD, LOG_LEVEL, DEMO_USERS
-#   ANTIVIRUS_ENABLED, EMAIL_ENABLED, TIKA_ENABLED
-#   KEYCLOAK_ENABLED
-#   EXTRA_SERVER_ENV (JSON object)
-#   OCIS_REPO_ROOT (GITHUB_WORKSPACE — needed for config file paths)
-
 OCIS_URL="${OCIS_URL_OVERRIDE:-https://localhost:9200}"
-CONFIG_DIR="${HOME}/.ocis/config"
+CONFIG_DIR="${OCIS_CONFIG_DIR_INPUT:-${HOME}/.ocis/config}"
+PID_FILE="${PID_FILE:-/tmp/ocis-wrapper.pid}"
+LOG_FILE="${LOG_FILE:-/tmp/ocis-server.log}"
 
-# Generate a throw-away fontsMap.json pointing at the font shipped in the repo.
-# Tests that render thumbnails from text files need this.
 REPO_ROOT="${OCIS_REPO_ROOT:-${GITHUB_WORKSPACE}}"
 FONT_PATH="${REPO_ROOT}/tests/config/ci/NotoSans.ttf"
 FONTMAP=$(mktemp /tmp/fontsMap-XXXXXX.json)
@@ -128,9 +115,9 @@ for key in "${!SERVER_ENV[@]}"; do
   ENV_ARGS+=("${key}=${SERVER_ENV[$key]}")
 done
 
+DIRECT_MODE=false
 if [[ "${KEYCLOAK_ENABLED:-false}" == "true" ]]; then
-  # Keycloak mode: exclude built-in IDP, start ocis server directly.
-  # ociswrapper's health-check API is incompatible with external IDPs.
+  DIRECT_MODE=true
   SERVER_ENV[OCIS_EXCLUDE_RUN_SERVICES]="idp"
   SERVER_ENV[IDM_CREATE_DEMO_USERS]="false"
   SERVER_ENV[PROXY_AUTOPROVISION_ACCOUNTS]="true"
@@ -149,8 +136,13 @@ if [[ "${KEYCLOAK_ENABLED:-false}" == "true" ]]; then
   for key in "${!SERVER_ENV[@]}"; do
     ENV_ARGS+=("${key}=${SERVER_ENV[$key]}")
   done
-  echo "Starting oCIS server (keycloak mode, no ociswrapper)..."
-  env "${ENV_ARGS[@]}" ocis server > /tmp/ocis-server.log 2>&1 &
+elif [[ "${WRAPPER_ENABLED:-true}" == "false" ]]; then
+  DIRECT_MODE=true
+fi
+
+if [[ "$DIRECT_MODE" == "true" ]]; then
+  echo "Starting oCIS server (direct mode)..."
+  env "${ENV_ARGS[@]}" ocis server > "$LOG_FILE" 2>&1 &
 else
   echo "Starting ociswrapper + oCIS server..."
   env "${ENV_ARGS[@]}" ociswrapper serve \
@@ -158,8 +150,8 @@ else
     --url "$OCIS_URL" \
     --admin-username admin \
     --admin-password "${ADMIN_PASSWORD:-admin}" \
-    > /tmp/ocis-server.log 2>&1 &
+    > "$LOG_FILE" 2>&1 &
 fi
 
-echo $! > /tmp/ocis-wrapper.pid
-echo "oCIS started (PID $(cat /tmp/ocis-wrapper.pid)), log: /tmp/ocis-server.log"
+echo $! > "$PID_FILE"
+echo "oCIS started (PID $(cat "$PID_FILE")), log: $LOG_FILE"
