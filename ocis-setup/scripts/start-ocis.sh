@@ -14,7 +14,7 @@ set -euo pipefail
 #   EXTRA_SERVER_ENV (JSON object)
 #   OCIS_REPO_ROOT (GITHUB_WORKSPACE — needed for config file paths)
 
-OCIS_URL="https://localhost:9200"
+OCIS_URL="${OCIS_URL_OVERRIDE:-https://localhost:9200}"
 CONFIG_DIR="${HOME}/.ocis/config"
 
 # Generate a throw-away fontsMap.json pointing at the font shipped in the repo.
