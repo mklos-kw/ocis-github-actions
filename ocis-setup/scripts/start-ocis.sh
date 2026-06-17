@@ -74,7 +74,7 @@ declare -A SERVER_ENV=(
 if [[ "${ANTIVIRUS_ENABLED:-false}" == "true" ]]; then
   SERVER_ENV[ANTIVIRUS_SCANNER_TYPE]="clamav"
   SERVER_ENV[ANTIVIRUS_CLAMAV_SOCKET]="tcp://localhost:3310"
-  SERVER_ENV[POSTPROCESSING_STEPS]="virusscan"
+  # Not setting POSTPROCESSING_STEPS=virusscan: tests that need it set it via ociswrapper at runtime
   SERVER_ENV[OCIS_ADD_RUN_SERVICES]="antivirus"
   SERVER_ENV[ANTIVIRUS_DEBUG_ADDR]="0.0.0.0:9277"
 fi
