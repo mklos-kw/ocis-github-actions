@@ -97,6 +97,16 @@ if [[ "${TIKA_ENABLED:-false}" == "true" ]]; then
   SERVER_ENV[SEARCH_EXTRACTOR_CS3SOURCE_INSECURE]="true"
 fi
 
+# Shift all debug ports by an offset (used when running a secondary oCIS instance alongside the primary)
+if [[ -n "${DEBUG_PORT_OFFSET:-}" && "${DEBUG_PORT_OFFSET}" != "0" ]]; then
+  for key in "${!SERVER_ENV[@]}"; do
+    [[ "$key" != *_DEBUG_ADDR ]] && continue
+    port="${SERVER_ENV[$key]##*:}"
+    host="${SERVER_ENV[$key]%:*}"
+    SERVER_ENV[$key]="${host}:$((port + DEBUG_PORT_OFFSET))"
+  done
+fi
+
 # Extra env vars from JSON input — use null-delimited records to handle values with '=' or newlines
 if [[ -n "${EXTRA_SERVER_ENV:-}" && "${EXTRA_SERVER_ENV}" != "{}" ]]; then
   while IFS=$'\x01' read -r -d $'\x00' key val; do
