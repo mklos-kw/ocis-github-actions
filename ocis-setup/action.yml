@@ -36,7 +36,7 @@ inputs:
     required: false
     default: "false"
   wrapper:
-    description: Start ociswrapper on :5200 for dynamic reconfiguration
+    description: Start ociswrapper on :5200 for dynamic reconfiguration; set to "false" to run ocis server directly
     required: false
     default: "true"
   tika:
@@ -63,6 +63,22 @@ inputs:
     description: oCIS base URL used for init and server startup (use https://127.0.0.1:9200 for e2e tests)
     required: false
     default: "https://localhost:9200"
+  ocis-config-dir:
+    description: oCIS config directory path; defaults to ~/.ocis/config
+    required: false
+    default: ""
+  pid-file:
+    description: File path to write the oCIS process PID
+    required: false
+    default: /tmp/ocis-wrapper.pid
+  log-file:
+    description: File path for oCIS server log output
+    required: false
+    default: /tmp/ocis-server.log
+  skip-test-runner-setup:
+    description: Skip PHP/libcurl/Composer setup (set to "true" for secondary instances that share the test runner)
+    required: false
+    default: "false"
 
 outputs:
   ocis-url:
@@ -83,18 +99,18 @@ runs:
         path: ocis/bin
 
     - name: Download ociswrapper artifact
-      if: inputs.ociswrapper-artifact != ''
+      if: inputs.ociswrapper-artifact != '' && inputs.wrapper != 'false'
       uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
       with:
         name: ${{ inputs.ociswrapper-artifact }}
         path: /usr/local/bin
 
     - name: Mark downloaded binaries executable
-      if: inputs.ocis-binary-artifact != '' || inputs.ociswrapper-artifact != ''
+      if: inputs.ocis-binary-artifact != '' || (inputs.ociswrapper-artifact != '' && inputs.wrapper != 'false')
       shell: bash
       run: |
         [[ -n "${{ inputs.ocis-binary-artifact }}" ]] && chmod +x ocis/bin/ocis || true
-        [[ -n "${{ inputs.ociswrapper-artifact }}" ]] && chmod +x /usr/local/bin/ociswrapper || true
+        [[ -n "${{ inputs.ociswrapper-artifact }}" && "${{ inputs.wrapper }}" != "false" ]] && chmod +x /usr/local/bin/ociswrapper || true
 
     # -------------------------------------------------------------------------
     # 1. Install oCIS binary (skip when a pre-built binary is provided)
@@ -122,17 +138,17 @@ runs:
         echo "Using oCIS from artifact: $(ocis --version 2>&1 | head -1)"
 
     # -------------------------------------------------------------------------
-    # 2. Build ociswrapper (always — it is always used as the process launcher)
+    # 2. Build ociswrapper (only when using ociswrapper mode)
     # -------------------------------------------------------------------------
     - name: Build ociswrapper from source (when using release binary)
-      if: inputs.ocis-binary == '' && inputs.ocis-binary-artifact == ''
+      if: inputs.ocis-binary == '' && inputs.ocis-binary-artifact == '' && inputs.wrapper != 'false' && inputs.keycloak != 'true'
       shell: bash
       env:
         OCIS_VERSION: ${{ inputs.ocis-version }}
       run: ${{ github.action_path }}/scripts/install-wrapper.sh
 
     - name: Build ociswrapper from local source (when using pre-built binary)
-      if: (inputs.ocis-binary != '' || inputs.ocis-binary-artifact != '') && inputs.ociswrapper-artifact == ''
+      if: (inputs.ocis-binary != '' || inputs.ocis-binary-artifact != '') && inputs.ociswrapper-artifact == '' && inputs.wrapper != 'false' && inputs.keycloak != 'true'
       shell: bash
       working-directory: ${{ github.workspace }}/tests/ociswrapper
       run: |
@@ -181,11 +197,10 @@ runs:
         echo "tika ready."
 
     # -------------------------------------------------------------------------
-    # 4. Install test-runner dependencies (must happen before oCIS starts —
-    #    apt-get pulls in libcurl4-openssl-dev which replaces the system libcurl
-    #    and would kill the running oCIS process if installed afterwards)
+    # 4. Install test-runner dependencies (skipped for secondary instances)
     # -------------------------------------------------------------------------
     - name: Install libcurl 8.12.0 build dependencies
+      if: inputs.skip-test-runner-setup != 'true'
       shell: bash
       run: |
         sudo apt-get update -qq
@@ -193,6 +208,7 @@ runs:
           libssl-dev libnghttp2-dev libpsl-dev libldap-dev libssh-dev zlib1g-dev libvips-dev
 
     - name: Cache libcurl 8.12.0
+      if: inputs.skip-test-runner-setup != 'true'
       id: cache-libcurl
       uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
       with:
@@ -200,7 +216,7 @@ runs:
         key: libcurl-8.12.0-${{ runner.os }}
 
     - name: Compile libcurl 8.12.0 from source
-      if: steps.cache-libcurl.outputs.cache-hit != 'true'
+      if: inputs.skip-test-runner-setup != 'true' && steps.cache-libcurl.outputs.cache-hit != 'true'
       shell: bash
       run: |
         cd /tmp
@@ -213,6 +229,7 @@ runs:
         sudo make install --silent
 
     - name: Restore libcurl ldconfig
+      if: inputs.skip-test-runner-setup != 'true'
       shell: bash
       run: |
         echo "/opt/libcurl/lib" | sudo tee /etc/ld.so.conf.d/libcurl-8.conf
@@ -228,6 +245,7 @@ runs:
         '
 
     - name: Install Composer dependencies
+      if: inputs.skip-test-runner-setup != 'true'
       shell: bash
       working-directory: ${{ github.workspace }}
       run: |
@@ -236,17 +254,18 @@ runs:
           composer bin behat install --no-progress
 
     # -------------------------------------------------------------------------
-    # 6. Init oCIS + copy config files
+    # 5. Init oCIS + copy config files
     # -------------------------------------------------------------------------
     - name: Init oCIS
       shell: bash
       env:
         OCIS_ACTION_PATH: ${{ github.action_path }}
         OCIS_URL: ${{ inputs.ocis-url }}
+        OCIS_CONFIG_DIR_INPUT: ${{ inputs.ocis-config-dir }}
       run: ${{ github.action_path }}/scripts/init-ocis.sh
 
     # -------------------------------------------------------------------------
-    # 7. Start oCIS via ociswrapper
+    # 6. Start oCIS via ociswrapper (or directly when wrapper: false)
     # -------------------------------------------------------------------------
     - name: Start oCIS
       shell: bash
@@ -258,36 +277,39 @@ runs:
         EMAIL_ENABLED: ${{ inputs.email }}
         TIKA_ENABLED: ${{ inputs.tika }}
         KEYCLOAK_ENABLED: ${{ inputs.keycloak }}
+        WRAPPER_ENABLED: ${{ inputs.wrapper }}
         EXTRA_SERVER_ENV: ${{ inputs.extra-server-env }}
         OCIS_REPO_ROOT: ${{ github.workspace }}
         OCIS_URL_OVERRIDE: ${{ inputs.ocis-url }}
+        OCIS_CONFIG_DIR_INPUT: ${{ inputs.ocis-config-dir }}
+        PID_FILE: ${{ inputs.pid-file }}
+        LOG_FILE: ${{ inputs.log-file }}
       run: ${{ github.action_path }}/scripts/start-ocis.sh
 
     # -------------------------------------------------------------------------
-    # 8. Wait for oCIS to be healthy
+    # 7. Wait for oCIS to be healthy
     # -------------------------------------------------------------------------
     - name: Wait for oCIS
       shell: bash
       env:
         KEYCLOAK_ENABLED: ${{ inputs.keycloak }}
+        OCIS_URL: ${{ inputs.ocis-url }}
+        LOG_FILE: ${{ inputs.log-file }}
       run: |
-        echo "Waiting for oCIS at https://localhost:9200..."
+        echo "Waiting for oCIS at ${OCIS_URL}..."
         if [[ "${KEYCLOAK_ENABLED:-false}" == "true" ]]; then
           timeout 300 bash -c '
-            until curl -sk https://localhost:9200/.well-known/openid-configuration \
+            until curl -sk "${OCIS_URL}/.well-known/openid-configuration" \
                   -w "%{http_code}" -o /dev/null 2>/dev/null | grep -q "200"; do
               sleep 2
             done
-          ' || (echo "=== oCIS failed to start ===" && \
-                 cat /tmp/ocis-server.log 2>/dev/null | tail -50 && exit 1)
+          ' || (echo "=== oCIS failed to start ===" && cat "${LOG_FILE}" 2>/dev/null | tail -50 && exit 1)
         else
           timeout 300 bash -c '
-            until curl -sk -uadmin:admin https://localhost:9200/graph/v1.0/users/admin \
+            until curl -sk -uadmin:admin "${OCIS_URL}/graph/v1.0/users/admin" \
                   -w "%{http_code}" -o /dev/null 2>/dev/null | grep -q "200"; do
               sleep 2
             done
-          ' || (echo "=== oCIS failed to start ===" && \
-                 cat /tmp/ocis-server.log 2>/dev/null | tail -50 && exit 1)
+          ' || (echo "=== oCIS failed to start ===" && cat "${LOG_FILE}" 2>/dev/null | tail -50 && exit 1)
         fi
         echo "ocis ready."
-
