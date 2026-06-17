@@ -15,7 +15,7 @@ inputs:
     required: false
     default: https://localhost:9200
   expected-failures-file:
-    description: Path to expected failures markdown (relative to repo root)
+    description: Path to a pre-merged expected failures file; if omitted the standard files are merged automatically
     required: false
     default: ""
   acceptance-test-type:
@@ -30,6 +30,24 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Merge expected failures files
+      if: inputs.expected-failures-file == '' && inputs.acceptance-test-type != 'core-api'
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      run: |
+        cat tests/acceptance/expected-failures-localAPI-on-OCIS-storage.md \
+            tests/acceptance/expected-failures-without-remotephp.md \
+            > /tmp/expected-failures-auto.md
+        echo "EXPECTED_FAILURES_AUTO=/tmp/expected-failures-auto.md" >> "$GITHUB_ENV"
+
+    - name: Merge core-api expected failures files
+      if: inputs.expected-failures-file == '' && inputs.acceptance-test-type == 'core-api'
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      run: |
+        cp tests/acceptance/expected-failures-API-on-OCIS-storage.md /tmp/expected-failures-auto.md
+        echo "EXPECTED_FAILURES_AUTO=/tmp/expected-failures-auto.md" >> "$GITHUB_ENV"
+
     - name: Run ${{ inputs.suite }}
       shell: bash
       working-directory: ${{ github.workspace }}
@@ -39,7 +57,7 @@ runs:
         OCIS_WRAPPER_URL: http://localhost:5200
         ACCEPTANCE_TEST_TYPE: ${{ inputs.acceptance-test-type }}
         WITH_REMOTE_PHP: ${{ inputs.with-remote-php }}
-        EXPECTED_FAILURES_FILE: ${{ inputs.expected-failures-file }}
+        EXPECTED_FAILURES_FILE: ${{ inputs.expected-failures-file != '' && inputs.expected-failures-file || env.EXPECTED_FAILURES_AUTO }}
         STORAGE_DRIVER: ocis
         UPLOAD_DELETE_WAIT_TIME: "0"
         EMAIL_HOST: localhost
