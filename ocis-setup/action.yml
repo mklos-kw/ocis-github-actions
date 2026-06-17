@@ -138,15 +138,14 @@ runs:
       if: inputs.ocis-binary != '' && inputs.ocis-binary-artifact == ''
       shell: bash
       run: |
-        sudo cp "${{ inputs.ocis-binary }}" /usr/local/bin/ocis
-        sudo chmod +x /usr/local/bin/ocis
+        sudo install -m 0755 "${{ inputs.ocis-binary }}" /usr/local/bin/ocis
         echo "Using pre-built oCIS: $(ocis --version 2>&1 | head -1)"
 
     - name: Install artifact oCIS binary system-wide
       if: inputs.ocis-binary-artifact != ''
       shell: bash
       run: |
-        sudo cp ocis/bin/ocis /usr/local/bin/ocis
+        sudo install -m 0755 ocis/bin/ocis /usr/local/bin/ocis
         echo "Using oCIS from artifact: $(ocis --version 2>&1 | head -1)"
 
     # -------------------------------------------------------------------------
