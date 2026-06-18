@@ -92,7 +92,7 @@ inputs:
     required: false
     default: onlyoffice/documentserver:9.0.0
   debug-port-offset:
-    description: Shift all debug port numbers by this amount — use 1000 for a secondary instance to avoid collisions with the primary
+    description: Shift all service port numbers (gRPC, HTTP, debug) by this amount — use 1000 for a secondary instance to avoid collisions with the primary
     required: false
     default: "0"
 
