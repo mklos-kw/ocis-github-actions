@@ -106,6 +106,9 @@ declare -A SERVER_ENV=(
   [WEB_DEBUG_ADDR]="0.0.0.0:9104"
   [WEBDAV_DEBUG_ADDR]="0.0.0.0:9119"
   [WEBFINGER_DEBUG_ADDR]="0.0.0.0:9279"
+  # optional-service debug addresses (must be in main map so the offset loop can shift them)
+  [ANTIVIRUS_DEBUG_ADDR]="0.0.0.0:9277"
+  [NOTIFICATIONS_DEBUG_ADDR]="0.0.0.0:9174"
 )
 
 # Antivirus
@@ -114,7 +117,6 @@ if [[ "${ANTIVIRUS_ENABLED:-false}" == "true" ]]; then
   SERVER_ENV[ANTIVIRUS_CLAMAV_SOCKET]="tcp://localhost:3310"
   # Not setting POSTPROCESSING_STEPS=virusscan: tests that need it set it via ociswrapper at runtime
   SERVER_ENV[OCIS_ADD_RUN_SERVICES]="antivirus"
-  SERVER_ENV[ANTIVIRUS_DEBUG_ADDR]="0.0.0.0:9277"
 fi
 
 # Email (notifications service)
@@ -124,7 +126,6 @@ if [[ "${EMAIL_ENABLED:-false}" == "true" ]]; then
   SERVER_ENV[NOTIFICATIONS_SMTP_PORT]="1025"
   SERVER_ENV[NOTIFICATIONS_SMTP_INSECURE]="true"
   SERVER_ENV[NOTIFICATIONS_SMTP_SENDER]="ownCloud <noreply@example.com>"
-  SERVER_ENV[NOTIFICATIONS_DEBUG_ADDR]="0.0.0.0:9174"
 fi
 
 # Tika (full-text search)
