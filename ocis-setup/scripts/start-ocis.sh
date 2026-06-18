@@ -32,6 +32,44 @@ declare -A SERVER_ENV=(
   [THUMBNAILS_TXT_FONTMAP_FILE]="$FONTMAP"
   [SEARCH_EXTRACTOR_TYPE]="basic"
   [FRONTEND_FULL_TEXT_SEARCH_ENABLED]="false"
+  # service gRPC addresses
+  [APP_PROVIDER_GRPC_ADDR]="0.0.0.0:9164"
+  [APP_REGISTRY_GRPC_ADDR]="0.0.0.0:9242"
+  [AUTH_BASIC_GRPC_ADDR]="0.0.0.0:9146"
+  [AUTH_MACHINE_GRPC_ADDR]="0.0.0.0:9166"
+  [AUTH_SERVICE_GRPC_ADDR]="0.0.0.0:9199"
+  [EVENTHISTORY_GRPC_ADDR]="0.0.0.0:9274"
+  [GATEWAY_GRPC_ADDR]="0.0.0.0:9142"
+  [GROUPS_GRPC_ADDR]="0.0.0.0:9160"
+  [OCM_GRPC_ADDR]="0.0.0.0:9282"
+  [SEARCH_GRPC_ADDR]="0.0.0.0:9220"
+  [SETTINGS_GRPC_ADDR]="0.0.0.0:9185"
+  [SHARING_GRPC_ADDR]="0.0.0.0:9150"
+  [STORAGE_PUBLICLINK_GRPC_ADDR]="0.0.0.0:9178"
+  [STORAGE_SHARES_GRPC_ADDR]="0.0.0.0:9154"
+  [STORAGE_SYSTEM_GRPC_ADDR]="0.0.0.0:9215"
+  [STORAGE_USERS_GRPC_ADDR]="0.0.0.0:9157"
+  [THUMBNAILS_GRPC_ADDR]="0.0.0.0:9191"
+  [USERS_GRPC_ADDR]="0.0.0.0:9144"
+  # service HTTP addresses
+  [ACTIVITYLOG_HTTP_ADDR]="0.0.0.0:9195"
+  [FRONTEND_HTTP_ADDR]="0.0.0.0:9140"
+  [GRAPH_HTTP_ADDR]="0.0.0.0:9120"
+  [IDM_LDAPS_ADDR]="0.0.0.0:9235"
+  [IDP_HTTP_ADDR]="0.0.0.0:9130"
+  [OCDAV_HTTP_ADDR]="0.0.0.0:9350"
+  [OCM_HTTP_ADDR]="0.0.0.0:9280"
+  [OCS_HTTP_ADDR]="0.0.0.0:9110"
+  [PROXY_HTTP_ADDR]="0.0.0.0:9200"
+  [SETTINGS_HTTP_ADDR]="0.0.0.0:9186"
+  [SSE_HTTP_ADDR]="0.0.0.0:9132"
+  [STORAGE_SYSTEM_HTTP_ADDR]="0.0.0.0:9216"
+  [STORAGE_USERS_HTTP_ADDR]="0.0.0.0:9158"
+  [THUMBNAILS_HTTP_ADDR]="0.0.0.0:9190"
+  [USERLOG_HTTP_ADDR]="0.0.0.0:9211"
+  [WEB_HTTP_ADDR]="0.0.0.0:9100"
+  [WEBDAV_HTTP_ADDR]="0.0.0.0:9115"
+  [WEBFINGER_HTTP_ADDR]="0.0.0.0:9275"
   # debug addresses
   [ACTIVITYLOG_DEBUG_ADDR]="0.0.0.0:9197"
   [APP_PROVIDER_DEBUG_ADDR]="0.0.0.0:9165"
@@ -97,12 +135,16 @@ if [[ "${TIKA_ENABLED:-false}" == "true" ]]; then
   SERVER_ENV[SEARCH_EXTRACTOR_CS3SOURCE_INSECURE]="true"
 fi
 
-# Shift all debug ports by an offset (used when running a secondary oCIS instance alongside the primary)
+# Shift all service ports by an offset (used when running a secondary oCIS instance alongside the primary)
 if [[ -n "${DEBUG_PORT_OFFSET:-}" && "${DEBUG_PORT_OFFSET}" != "0" ]]; then
   for key in "${!SERVER_ENV[@]}"; do
-    [[ "$key" != *_DEBUG_ADDR ]] && continue
-    port="${SERVER_ENV[$key]##*:}"
-    host="${SERVER_ENV[$key]%:*}"
+    [[ "$key" != *_ADDR ]] && continue
+    val="${SERVER_ENV[$key]}"
+    # Only shift host:port values (must contain a colon with a numeric port after it)
+    [[ "$val" != *:* ]] && continue
+    port="${val##*:}"
+    [[ "$port" =~ ^[0-9]+$ ]] || continue
+    host="${val%:*}"
     SERVER_ENV[$key]="${host}:$((port + DEBUG_PORT_OFFSET))"
   done
 fi
