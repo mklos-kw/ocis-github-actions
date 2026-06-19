@@ -41,17 +41,7 @@ runs:
       run: |
         # Get admin personal space ID
         SPACE_ID=$(curl -sk -uadmin:admin "${OCIS_URL}/graph/v1.0/me/drives" \
-          | python3 -c "
-import json, sys
-drives = json.load(sys.stdin)
-for d in drives.get('value', []):
-    if d.get('driveType') == 'personal':
-        url = d.get('root', {}).get('webDavUrl', '')
-        parts = [p for p in url.split('/') if p]
-        if parts:
-            print(parts[-1])
-            break
-")
+          | jq -r '.value[] | select(.driveType=="personal") | .root.webDavUrl | split("/") | last')
         echo "LITMUS_SPACE_ID=${SPACE_ID}" >> "$GITHUB_ENV"
         echo "Space ID: ${SPACE_ID}"
 
@@ -63,8 +53,7 @@ for d in drives.get('value', []):
         SHARE_RESP=$(curl -sk -ueinstein:relativity \
           "${OCIS_URL}/ocs/v2.php/apps/files_sharing/api/v1/shares" \
           -d "path=/litmus_folder&shareType=0&permissions=15&name=litmus_folder&shareWith=admin")
-        SHARE_ID=$(echo "$SHARE_RESP" \
-          | python3 -c "import re,sys; m=re.search(r'<id>(.+?)</id>', sys.stdin.read()); print(m.group(1) if m else '')")
+        SHARE_ID=$(echo "$SHARE_RESP" | grep -oP '(?<=<id>)[^<]+' | head -1)
         if [[ -n "$SHARE_ID" ]]; then
           curl -X POST -sk -uadmin:admin \
             "${OCIS_URL}/ocs/v2.php/apps/files_sharing/api/v1/shares/pending/${SHARE_ID}" \
