@@ -95,6 +95,10 @@ inputs:
     description: Shift all service port numbers (gRPC, HTTP, debug) by this amount — use 1000 for a secondary instance to avoid collisions with the primary
     required: false
     default: "0"
+  web-ui-config:
+    description: Path to web UI config JSON; the Docker Compose hostname (ocis-server:9200) is rewritten to match ocis-url so the file works in CI
+    required: false
+    default: ""
 
 outputs:
   ocis-url:
@@ -295,7 +299,26 @@ runs:
       run: ${{ github.action_path }}/scripts/init-ocis.sh
 
     # -------------------------------------------------------------------------
-    # 7. Start oCIS via ociswrapper (or directly when wrapper: false)
+    # 7. Patch web UI config (rewrite Docker Compose hostname to CI host)
+    # -------------------------------------------------------------------------
+    - name: Patch web UI config
+      if: inputs.web-ui-config != ''
+      shell: bash
+      env:
+        OCIS_URL: ${{ inputs.ocis-url }}
+        OCIS_CONFIG_DIR: ${{ inputs.ocis-config-dir }}
+        WEB_UI_CONFIG_SRC: ${{ inputs.web-ui-config }}
+      run: |
+        CONFIG_DIR="${OCIS_CONFIG_DIR:-${HOME}/.ocis/config}"
+        mkdir -p "$CONFIG_DIR"
+        HOST="${OCIS_URL#https://}"
+        sed "s|ocis-server:9200|${HOST}|g" \
+          "${GITHUB_WORKSPACE}/${WEB_UI_CONFIG_SRC}" \
+          > "${CONFIG_DIR}/web-ui-config.json"
+        echo "WEB_UI_CONFIG_FILE=${CONFIG_DIR}/web-ui-config.json" >> "$GITHUB_ENV"
+
+    # -------------------------------------------------------------------------
+    # 8. Start oCIS via ociswrapper (or directly when wrapper: false)
     # -------------------------------------------------------------------------
     - name: Start oCIS
       shell: bash
@@ -318,7 +341,7 @@ runs:
       run: ${{ github.action_path }}/scripts/start-ocis.sh
 
     # -------------------------------------------------------------------------
-    # 8. Wait for oCIS to be healthy
+    # 9. Wait for oCIS to be healthy
     # -------------------------------------------------------------------------
     - name: Wait for oCIS
       shell: bash
@@ -346,7 +369,7 @@ runs:
         echo "ocis ready."
 
     # -------------------------------------------------------------------------
-    # 9. Trust oCIS self-signed cert
+    # 10. Trust oCIS self-signed cert
     # -------------------------------------------------------------------------
     # ocis init generates a self-signed TLS cert. Trust it system-wide so
     # curl (API tests) and Playwright (e2e) can reach oCIS without --insecure.
@@ -364,7 +387,7 @@ runs:
         echo "OCIS_CERT=$CERT" >> "$GITHUB_ENV"
 
     # -------------------------------------------------------------------------
-    # 10. Optional WOPI collaboration apps
+    # 11. Optional WOPI collaboration apps
     # -------------------------------------------------------------------------
     - name: Start FakeOffice
       if: contains(inputs.collaboration-apps, 'fakeoffice')
