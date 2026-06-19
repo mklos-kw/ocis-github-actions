@@ -269,7 +269,22 @@ runs:
           composer bin behat install --no-progress
 
     # -------------------------------------------------------------------------
-    # 5. Init oCIS + copy config files
+    # 5. Generate oCIS frontend assets (only when using a pre-built binary)
+    # -------------------------------------------------------------------------
+    - name: Setup pnpm for asset generation
+      if: inputs.ocis-binary != '' || inputs.ocis-binary-artifact != ''
+      uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      with:
+        version: "10.28.1"
+
+    - name: Generate frontend assets
+      if: inputs.ocis-binary != '' || inputs.ocis-binary-artifact != ''
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      run: make ci-node-generate
+
+    # -------------------------------------------------------------------------
+    # 6. Init oCIS + copy config files
     # -------------------------------------------------------------------------
     - name: Init oCIS
       shell: bash
@@ -280,7 +295,7 @@ runs:
       run: ${{ github.action_path }}/scripts/init-ocis.sh
 
     # -------------------------------------------------------------------------
-    # 6. Start oCIS via ociswrapper (or directly when wrapper: false)
+    # 7. Start oCIS via ociswrapper (or directly when wrapper: false)
     # -------------------------------------------------------------------------
     - name: Start oCIS
       shell: bash
@@ -303,7 +318,7 @@ runs:
       run: ${{ github.action_path }}/scripts/start-ocis.sh
 
     # -------------------------------------------------------------------------
-    # 7. Wait for oCIS to be healthy
+    # 8. Wait for oCIS to be healthy
     # -------------------------------------------------------------------------
     - name: Wait for oCIS
       shell: bash
@@ -331,7 +346,7 @@ runs:
         echo "ocis ready."
 
     # -------------------------------------------------------------------------
-    # 8. Trust oCIS self-signed cert
+    # 9. Trust oCIS self-signed cert
     # -------------------------------------------------------------------------
     # ocis init generates a self-signed TLS cert. Trust it system-wide so
     # curl (API tests) and Playwright (e2e) can reach oCIS without --insecure.
@@ -349,7 +364,7 @@ runs:
         echo "OCIS_CERT=$CERT" >> "$GITHUB_ENV"
 
     # -------------------------------------------------------------------------
-    # 9. Optional WOPI collaboration apps
+    # 10. Optional WOPI collaboration apps
     # -------------------------------------------------------------------------
     - name: Start FakeOffice
       if: contains(inputs.collaboration-apps, 'fakeoffice')
