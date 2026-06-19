@@ -100,7 +100,7 @@ inputs:
     required: false
     default: ""
   docker-accessible:
-    description: Bind oCIS to the Docker bridge IP so containers can reach it; exports OCIS_DOCKER_URL for use in ocis-test suite=litmus
+    description: Bind oCIS to the Docker bridge IP so containers can reach it; exports OCIS_BRIDGE_IP and OCIS_DOCKER_URL
     required: false
     default: "false"
 
@@ -300,8 +300,9 @@ runs:
       run: |
         BRIDGE_IP=$(docker network inspect bridge \
           --format '{{range .IPAM.Config}}{{.Gateway}}{{end}}')
+        echo "OCIS_BRIDGE_IP=${BRIDGE_IP}" >> "$GITHUB_ENV"
         echo "OCIS_DOCKER_URL=https://${BRIDGE_IP}:9200" >> "$GITHUB_ENV"
-        echo "Docker bridge IP: ${BRIDGE_IP} → OCIS_DOCKER_URL=https://${BRIDGE_IP}:9200"
+        echo "Docker bridge IP: ${BRIDGE_IP}"
 
     # -------------------------------------------------------------------------
     # 7. Init oCIS + copy config files
