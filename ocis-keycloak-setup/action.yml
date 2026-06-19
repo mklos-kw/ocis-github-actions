@@ -78,3 +78,11 @@ runs:
         timeout 300 bash -c 'until curl -skf https://localhost:9000/health/ready; do sleep 3; done' \
           || (echo "=== keycloak logs ===" && docker logs keycloak --tail 80 && exit 1)
         echo "keycloak ready."
+
+    - name: Trust Keycloak self-signed cert
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      run: |
+        sudo cp keycloak-certs/keycloakcrt.pem /usr/local/share/ca-certificates/keycloak.crt
+        sudo update-ca-certificates
+        echo "KEYCLOAK_CERT=$(pwd)/keycloak-certs/keycloakcrt.pem" >> "$GITHUB_ENV"
