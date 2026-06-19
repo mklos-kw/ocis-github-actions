@@ -1,6 +1,6 @@
 name: 'oCIS Test'
 author: 'mklos-kw'
-description: 'Run oCIS Behat acceptance tests or litmus WebDAV tests against a running oCIS instance.'
+description: 'Run oCIS Behat acceptance tests, litmus WebDAV tests, or WOPI validator tests against a running oCIS instance.'
 
 branding:
   icon: 'check-circle'
@@ -8,7 +8,7 @@ branding:
 
 inputs:
   suite:
-    description: Behat suite(s) to run, comma-separated (e.g. apiGraph or apiAntivirus,apiSettings), or "litmus" to run litmus WebDAV tests
+    description: Behat suite(s) to run, comma-separated (e.g. apiGraph or apiAntivirus,apiSettings), "litmus" to run litmus WebDAV tests, or "wopi-builtin" / "wopi-cs3" to run WOPI validator tests
     required: true
   ocis-url:
     description: oCIS instance URL
@@ -104,10 +104,90 @@ runs:
         echo "All litmus tests passed."
 
     # =========================================================================
+    # WOPI validator tests (suite: wopi-builtin or wopi-cs3)
+    # =========================================================================
+    - name: Prepare WOPI test file and extract tokens
+      if: startsWith(inputs.suite, 'wopi-')
+      shell: bash
+      env:
+        OCIS_URL: ${{ inputs.ocis-url }}
+      run: |
+        # Upload test file; capture response headers for file ID
+        curl -sk -uadmin:admin -X PUT \
+          --fail --retry-connrefused --retry 7 --retry-all-errors \
+          "${OCIS_URL}/remote.php/webdav/test.wopitest" \
+          -D /tmp/wopi-headers.txt
+
+        FILE_ID=$(grep -i 'Oc-Fileid:' /tmp/wopi-headers.txt | sed 's/.*: *//' | tr -d '\r\n ')
+        echo "FILE_ID=${FILE_ID}"
+
+        FILE_ID_ENC=$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1], safe=''))" "${FILE_ID}")
+
+        OPEN=$(curl -sk -uadmin:admin -X POST --fail \
+          --retry-connrefused --retry 7 --retry-all-errors \
+          "${OCIS_URL}/app/open?app_name=FakeOffice&file_id=${FILE_ID_ENC}")
+        echo "open: ${OPEN:0:400}"
+
+        ACCESS_TOKEN=$(echo "$OPEN" | jq -r '.form_parameters.access_token')
+        TTL=$(echo "$OPEN"          | jq -r '.form_parameters.access_token_ttl')
+        APP_URL=$(echo "$OPEN"      | jq -r '.app_url // ""')
+
+        # Extract encoded file ID from app_url, fall back to re-encoding FILE_ID
+        if echo "$APP_URL" | grep -q 'files%2F'; then
+          FILE_ID_ENC=$(echo "$APP_URL" | sed 's/.*files%2F//')
+        elif echo "$APP_URL" | grep -q 'files/'; then
+          FILE_ID_ENC=$(echo "$APP_URL" | sed 's/.*files\///')
+        fi
+
+        # wopi-builtin collaboration service runs on :9320
+        WOPI_SRC="http://localhost:9320/wopi/files/${FILE_ID_ENC}"
+        echo "WOPI_SRC=${WOPI_SRC}"
+
+        echo "WOPI_ACCESS_TOKEN=${ACCESS_TOKEN}" >> "$GITHUB_ENV"
+        echo "WOPI_TTL=${TTL}"                   >> "$GITHUB_ENV"
+        echo "WOPI_SRC=${WOPI_SRC}"              >> "$GITHUB_ENV"
+
+    - name: Run WOPI validator
+      if: startsWith(inputs.suite, 'wopi-')
+      shell: bash
+      env:
+        SUITE: ${{ inputs.suite }}
+        WOPI_ACCESS_TOKEN: ${{ env.WOPI_ACCESS_TOKEN }}
+        WOPI_TTL: ${{ env.WOPI_TTL }}
+        WOPI_SRC: ${{ env.WOPI_SRC }}
+      run: |
+        VALIDATOR_IMAGE="owncloudci/wopi-validator"
+        FAILED=()
+
+        SHARED_GROUPS=(BaseWopiViewing CheckFileInfoSchema EditFlows Locks AccessTokens GetLock ExtendedLockLength FileVersion Features)
+        BUILTIN_GROUPS=(PutRelativeFile RenameFileIfCreateChildFileIsNotSupported)
+
+        run_group() {
+          local group=$1 secure_flag=${2:-}
+          echo "=== wopi-validator [${group}] ==="
+          docker run --rm --network host --workdir /app \
+            --entrypoint /app/Microsoft.Office.WopiValidator \
+            "$VALIDATOR_IMAGE" \
+            ${secure_flag:+-s} -t "$WOPI_ACCESS_TOKEN" -w "$WOPI_SRC" -l "$WOPI_TTL" \
+            --testgroup "$group" || FAILED+=("$group")
+        }
+
+        for group in "${SHARED_GROUPS[@]}"; do run_group "$group"; done
+        if [[ "$SUITE" == "wopi-builtin" ]]; then
+          for group in "${BUILTIN_GROUPS[@]}"; do run_group "$group" secure; done
+        fi
+
+        if [[ ${#FAILED[@]} -gt 0 ]]; then
+          echo "Failed testgroups: ${FAILED[*]}"
+          exit 1
+        fi
+        echo "All WOPI validator tests passed."
+
+    # =========================================================================
     # Behat acceptance tests (all other suites)
     # =========================================================================
     - name: Merge expected failures files
-      if: inputs.suite != 'litmus' && inputs.expected-failures-file == '' && inputs.acceptance-test-type != 'core-api'
+      if: "!startsWith(inputs.suite, 'litmus') && !startsWith(inputs.suite, 'wopi-') && inputs.expected-failures-file == '' && inputs.acceptance-test-type != 'core-api'"
       shell: bash
       working-directory: ${{ github.workspace }}
       run: |
@@ -117,7 +197,7 @@ runs:
         echo "EXPECTED_FAILURES_AUTO=/tmp/expected-failures-auto.md" >> "$GITHUB_ENV"
 
     - name: Merge core-api expected failures files
-      if: inputs.suite != 'litmus' && inputs.expected-failures-file == '' && inputs.acceptance-test-type == 'core-api'
+      if: "!startsWith(inputs.suite, 'litmus') && !startsWith(inputs.suite, 'wopi-') && inputs.expected-failures-file == '' && inputs.acceptance-test-type == 'core-api'"
       shell: bash
       working-directory: ${{ github.workspace }}
       run: |
@@ -125,7 +205,7 @@ runs:
         echo "EXPECTED_FAILURES_AUTO=/tmp/expected-failures-auto.md" >> "$GITHUB_ENV"
 
     - name: Run ${{ inputs.suite }}
-      if: inputs.suite != 'litmus'
+      if: "!startsWith(inputs.suite, 'litmus') && !startsWith(inputs.suite, 'wopi-')"
       shell: bash
       working-directory: ${{ github.workspace }}
       env:
