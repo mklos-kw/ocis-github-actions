@@ -111,6 +111,7 @@ runs:
       shell: bash
       env:
         OCIS_URL: ${{ inputs.ocis-url }}
+        SUITE: ${{ inputs.suite }}
       run: |
         # Upload test file; capture response headers for file ID
         curl -sk -uadmin:admin -X PUT \
@@ -139,8 +140,13 @@ runs:
           FILE_ID_ENC=$(echo "$APP_URL" | sed 's/.*files\///')
         fi
 
-        # wopi-builtin collaboration service runs on :9320
-        WOPI_SRC="http://localhost:9320/wopi/files/${FILE_ID_ENC}"
+        # wopi-builtin: ocis collaboration service on :9320; wopi-cs3: cs3org/wopiserver on :9300
+        if [[ "$SUITE" == "wopi-cs3" ]]; then
+          WOPI_PORT=9300
+        else
+          WOPI_PORT=9320
+        fi
+        WOPI_SRC="http://localhost:${WOPI_PORT}/wopi/files/${FILE_ID_ENC}"
         echo "WOPI_SRC=${WOPI_SRC}"
 
         echo "WOPI_ACCESS_TOKEN=${ACCESS_TOKEN}" >> "$GITHUB_ENV"
