@@ -331,7 +331,25 @@ runs:
         echo "ocis ready."
 
     # -------------------------------------------------------------------------
-    # 8. Optional WOPI collaboration apps
+    # 8. Trust oCIS self-signed cert
+    # -------------------------------------------------------------------------
+    # ocis init generates a self-signed TLS cert. Trust it system-wide so
+    # curl (API tests) and Playwright (e2e) can reach oCIS without --insecure.
+    # Exports OCIS_CERT for NODE_EXTRA_CA_CERTS in e2e runners.
+    - name: Trust oCIS self-signed cert
+      shell: bash
+      env:
+        OCIS_CONFIG_DIR: ${{ inputs.ocis-config-dir }}
+      run: |
+        CERT="${OCIS_CONFIG_DIR:-${HOME}/.ocis/config}/../proxy/server.crt"
+        if [[ -f "$CERT" ]]; then
+          sudo cp "$CERT" /usr/local/share/ca-certificates/ocis.crt
+          sudo update-ca-certificates
+        fi
+        echo "OCIS_CERT=$CERT" >> "$GITHUB_ENV"
+
+    # -------------------------------------------------------------------------
+    # 9. Optional WOPI collaboration apps
     # -------------------------------------------------------------------------
     - name: Start FakeOffice
       if: contains(inputs.collaboration-apps, 'fakeoffice')
