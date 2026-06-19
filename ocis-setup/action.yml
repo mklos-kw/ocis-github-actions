@@ -269,16 +269,7 @@ runs:
           composer bin behat install --no-progress
 
     # -------------------------------------------------------------------------
-    # 5. Generate oCIS frontend assets (only when using source checkout)
-    # -------------------------------------------------------------------------
-    - name: Generate frontend assets
-      if: inputs.ocis-binary != '' || inputs.ocis-binary-artifact != ''
-      shell: bash
-      working-directory: ${{ github.workspace }}
-      run: make ci-node-generate
-
-    # -------------------------------------------------------------------------
-    # 7. Init oCIS + copy config files
+    # 5. Init oCIS + copy config files
     # -------------------------------------------------------------------------
     - name: Init oCIS
       shell: bash
@@ -289,7 +280,7 @@ runs:
       run: ${{ github.action_path }}/scripts/init-ocis.sh
 
     # -------------------------------------------------------------------------
-    # 8. Start oCIS via ociswrapper (or directly when wrapper: false)
+    # 6. Start oCIS via ociswrapper (or directly when wrapper: false)
     # -------------------------------------------------------------------------
     - name: Start oCIS
       shell: bash
@@ -312,7 +303,7 @@ runs:
       run: ${{ github.action_path }}/scripts/start-ocis.sh
 
     # -------------------------------------------------------------------------
-    # 9. Wait for oCIS to be healthy
+    # 7. Wait for oCIS to be healthy
     # -------------------------------------------------------------------------
     - name: Wait for oCIS
       shell: bash
@@ -340,7 +331,7 @@ runs:
         echo "ocis ready."
 
     # -------------------------------------------------------------------------
-    # 10. Optional WOPI collaboration apps
+    # 8. Optional WOPI collaboration apps
     # -------------------------------------------------------------------------
     - name: Start FakeOffice
       if: contains(inputs.collaboration-apps, 'fakeoffice')
