@@ -99,6 +99,10 @@ inputs:
     description: Path to web UI config JSON; the Docker Compose hostname (ocis-server:9200) is rewritten to match ocis-url so the file works in CI
     required: false
     default: ""
+  docker-accessible:
+    description: Bind oCIS to the Docker bridge IP so containers can reach it; exports OCIS_DOCKER_URL for use in ocis-test suite=litmus
+    required: false
+    default: "false"
 
 outputs:
   ocis-url:
@@ -288,7 +292,19 @@ runs:
       run: make ci-node-generate
 
     # -------------------------------------------------------------------------
-    # 6. Init oCIS + copy config files
+    # 6. Resolve Docker bridge IP (when containers need to reach oCIS on host)
+    # -------------------------------------------------------------------------
+    - name: Resolve Docker bridge IP
+      if: inputs.docker-accessible == 'true'
+      shell: bash
+      run: |
+        BRIDGE_IP=$(docker network inspect bridge \
+          --format '{{range .IPAM.Config}}{{.Gateway}}{{end}}')
+        echo "OCIS_DOCKER_URL=https://${BRIDGE_IP}:9200" >> "$GITHUB_ENV"
+        echo "Docker bridge IP: ${BRIDGE_IP} → OCIS_DOCKER_URL=https://${BRIDGE_IP}:9200"
+
+    # -------------------------------------------------------------------------
+    # 7. Init oCIS + copy config files
     # -------------------------------------------------------------------------
     - name: Init oCIS
       shell: bash
@@ -299,7 +315,7 @@ runs:
       run: ${{ github.action_path }}/scripts/init-ocis.sh
 
     # -------------------------------------------------------------------------
-    # 7. Patch web UI config (rewrite Docker Compose hostname to CI host)
+    # 8. Patch web UI config (rewrite Docker Compose hostname to CI host)
     # -------------------------------------------------------------------------
     - name: Patch web UI config
       if: inputs.web-ui-config != ''
@@ -317,7 +333,7 @@ runs:
         echo "WEB_UI_CONFIG_FILE=${CONFIG_DIR}/web-ui-config.json" >> "$GITHUB_ENV"
 
     # -------------------------------------------------------------------------
-    # 8. Start oCIS via ociswrapper (or directly when wrapper: false)
+    # 9. Start oCIS via ociswrapper (or directly when wrapper: false)
     # -------------------------------------------------------------------------
     - name: Start oCIS
       shell: bash
@@ -340,7 +356,7 @@ runs:
       run: ${{ github.action_path }}/scripts/start-ocis.sh
 
     # -------------------------------------------------------------------------
-    # 9. Wait for oCIS to be healthy
+    # 10. Wait for oCIS to be healthy
     # -------------------------------------------------------------------------
     - name: Wait for oCIS
       shell: bash
@@ -368,7 +384,7 @@ runs:
         echo "ocis ready."
 
     # -------------------------------------------------------------------------
-    # 10. Trust oCIS self-signed cert
+    # 11. Trust oCIS self-signed cert
     # -------------------------------------------------------------------------
     # ocis init generates a self-signed TLS cert. Trust it system-wide so
     # curl (API tests) and Playwright (e2e) can reach oCIS without --insecure.
@@ -386,7 +402,7 @@ runs:
         echo "OCIS_CERT=$CERT" >> "$GITHUB_ENV"
 
     # -------------------------------------------------------------------------
-    # 11. Optional WOPI collaboration apps
+    # 12. Optional WOPI collaboration apps
     # -------------------------------------------------------------------------
     - name: Start FakeOffice
       if: contains(inputs.collaboration-apps, 'fakeoffice')
