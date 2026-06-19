@@ -103,6 +103,10 @@ inputs:
     description: Bind oCIS to the Docker bridge IP so containers can reach it; exports OCIS_BRIDGE_IP and OCIS_DOCKER_URL
     required: false
     default: "false"
+  cs3-wopi-server:
+    description: Start cs3org/wopiserver on :9300 alongside fakeoffice for cs3 WOPI tests
+    required: false
+    default: "false"
 
 outputs:
   ocis-url:
@@ -507,3 +511,35 @@ runs:
             || (echo "=== collab-${name} log ===" && cat /tmp/collab-${name}.log | tail -30 && exit 1)
         done
         echo "All collaboration services ready."
+
+    # -------------------------------------------------------------------------
+    # 13. Optional cs3org/wopiserver (for wopi-cs3 tests)
+    # -------------------------------------------------------------------------
+    - name: Start fakeoffice for cs3 WOPI
+      if: inputs.cs3-wopi-server == 'true'
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      run: |
+        docker run -d --name wopi-fakeoffice --network host \
+          -v "$(pwd):/ocis:ro" \
+          python:3-alpine \
+          python3 /ocis/tests/config/ci/fakeoffice-server.py
+        echo "Waiting for fakeoffice /hosting/discovery..."
+        timeout 300 bash -c 'until curl -sf http://localhost:8080/hosting/discovery; do sleep 2; done'
+        echo "fakeoffice ready."
+
+    - name: Start cs3org/wopiserver
+      if: inputs.cs3-wopi-server == 'true'
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      run: |
+        sed 's|ocis-server|localhost|g' tests/config/ci/wopiserver.conf > /tmp/wopiserver-patched.conf
+        echo "123" > /tmp/wopisecret
+        docker run -d --name wopi-cs3server --network host \
+          -v "/tmp/wopiserver-patched.conf:/etc/wopi/wopiserver.conf" \
+          -v "/tmp/wopisecret:/etc/wopi/wopisecret" \
+          --entrypoint /app/wopiserver.py \
+          cs3org/wopiserver:v10.4.0
+        echo "Waiting for cs3 wopi server on :9300..."
+        timeout 120 bash -c 'until curl -sf http://localhost:9300/wopi/cbox/endpoints 2>/dev/null || nc -z localhost 9300 2>/dev/null; do sleep 2; done'
+        echo "cs3 wopi server ready."
