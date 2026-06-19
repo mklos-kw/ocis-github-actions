@@ -311,8 +311,7 @@ runs:
       run: |
         CONFIG_DIR="${OCIS_CONFIG_DIR:-${HOME}/.ocis/config}"
         mkdir -p "$CONFIG_DIR"
-        HOST="${OCIS_URL#https://}"
-        sed "s|ocis-server:9200|${HOST}|g" \
+        sed "s|https://ocis-server:9200|${OCIS_URL}|g" \
           "${GITHUB_WORKSPACE}/${WEB_UI_CONFIG_SRC}" \
           > "${CONFIG_DIR}/web-ui-config.json"
         echo "WEB_UI_CONFIG_FILE=${CONFIG_DIR}/web-ui-config.json" >> "$GITHUB_ENV"
