@@ -1,6 +1,6 @@
 name: 'oCIS Test'
 author: 'mklos-kw'
-description: 'Run oCIS Behat acceptance tests against a running oCIS instance.'
+description: 'Run oCIS Behat acceptance tests or litmus WebDAV tests against a running oCIS instance.'
 
 branding:
   icon: 'check-circle'
@@ -8,7 +8,7 @@ branding:
 
 inputs:
   suite:
-    description: Behat suite(s) to run, comma-separated (e.g. apiGraph or apiAntivirus,apiSettings)
+    description: Behat suite(s) to run, comma-separated (e.g. apiGraph or apiAntivirus,apiSettings), or "litmus" to run litmus WebDAV tests
     required: true
   ocis-url:
     description: oCIS instance URL
@@ -30,8 +30,95 @@ inputs:
 runs:
   using: composite
   steps:
+    # =========================================================================
+    # Litmus WebDAV tests (suite: litmus)
+    # =========================================================================
+    - name: Setup litmus fixtures
+      if: inputs.suite == 'litmus'
+      shell: bash
+      env:
+        OCIS_URL: ${{ inputs.ocis-url }}
+      run: |
+        # Get admin personal space ID
+        SPACE_ID=$(curl -sk -uadmin:admin "${OCIS_URL}/graph/v1.0/me/drives" \
+          | python3 -c "
+import json, sys
+drives = json.load(sys.stdin)
+for d in drives.get('value', []):
+    if d.get('driveType') == 'personal':
+        url = d.get('root', {}).get('webDavUrl', '')
+        parts = [p for p in url.split('/') if p]
+        if parts:
+            print(parts[-1])
+            break
+")
+        echo "LITMUS_SPACE_ID=${SPACE_ID}" >> "$GITHUB_ENV"
+        echo "Space ID: ${SPACE_ID}"
+
+        # Create test folder as einstein
+        curl -sk -ueinstein:relativity -X MKCOL \
+          "${OCIS_URL}/remote.php/webdav/litmus_folder" > /dev/null
+
+        # Share einstein's folder with admin
+        SHARE_RESP=$(curl -sk -ueinstein:relativity \
+          "${OCIS_URL}/ocs/v2.php/apps/files_sharing/api/v1/shares" \
+          -d "path=/litmus_folder&shareType=0&permissions=15&name=litmus_folder&shareWith=admin")
+        SHARE_ID=$(echo "$SHARE_RESP" \
+          | python3 -c "import re,sys; m=re.search(r'<id>(.+?)</id>', sys.stdin.read()); print(m.group(1) if m else '')")
+        if [[ -n "$SHARE_ID" ]]; then
+          curl -X POST -sk -uadmin:admin \
+            "${OCIS_URL}/ocs/v2.php/apps/files_sharing/api/v1/shares/pending/${SHARE_ID}" \
+            > /dev/null
+          echo "Share accepted (ID: ${SHARE_ID})"
+        fi
+
+        # Public link on the folder
+        curl -sk -ueinstein:relativity \
+          "${OCIS_URL}/ocs/v2.php/apps/files_sharing/api/v1/shares" \
+          -d "path=/litmus_folder&shareType=3&permissions=15&name=litmus_folder" > /dev/null
+        echo "Public link created."
+
+    - name: Run litmus tests
+      if: inputs.suite == 'litmus'
+      shell: bash
+      env:
+        OCIS_URL: ${{ inputs.ocis-url }}
+        LITMUS_SPACE_ID: ${{ env.LITMUS_SPACE_ID }}
+      run: |
+        # Use OCIS_DOCKER_URL (bridge IP) when available so Docker containers can
+        # reach oCIS on the host; fall back to OCIS_URL for local/direct runs.
+        BASE="${OCIS_DOCKER_URL:-${OCIS_URL}}"
+        LITMUS_IMAGE="owncloudci/litmus@sha256:e44053de2d47d44aedfe9b3db6f0000188b886f4be1a3c052e66ef3f635d2a17"
+        FAILED=()
+
+        run_litmus() {
+          local name=$1 endpoint=$2
+          echo "=== litmus [${name}]: ${endpoint} ==="
+          docker run --rm \
+            -e "LITMUS_URL=${endpoint}" \
+            -e LITMUS_USERNAME=admin \
+            -e LITMUS_PASSWORD=admin \
+            -e "TESTS=basic copymove props http" \
+            "$LITMUS_IMAGE" || FAILED+=("$name")
+        }
+
+        run_litmus "old-endpoint"    "${BASE}/remote.php/webdav"
+        run_litmus "new-endpoint"    "${BASE}/remote.php/dav/files/admin"
+        run_litmus "new-shared"      "${BASE}/remote.php/dav/files/admin/Shares/litmus_folder/"
+        run_litmus "old-shared"      "${BASE}/remote.php/webdav/Shares/litmus_folder/"
+        run_litmus "spaces-endpoint" "${BASE}/remote.php/dav/spaces/${LITMUS_SPACE_ID}"
+
+        if [[ ${#FAILED[@]} -gt 0 ]]; then
+          echo "Failed litmus endpoints: ${FAILED[*]}"
+          exit 1
+        fi
+        echo "All litmus tests passed."
+
+    # =========================================================================
+    # Behat acceptance tests (all other suites)
+    # =========================================================================
     - name: Merge expected failures files
-      if: inputs.expected-failures-file == '' && inputs.acceptance-test-type != 'core-api'
+      if: inputs.suite != 'litmus' && inputs.expected-failures-file == '' && inputs.acceptance-test-type != 'core-api'
       shell: bash
       working-directory: ${{ github.workspace }}
       run: |
@@ -41,7 +128,7 @@ runs:
         echo "EXPECTED_FAILURES_AUTO=/tmp/expected-failures-auto.md" >> "$GITHUB_ENV"
 
     - name: Merge core-api expected failures files
-      if: inputs.expected-failures-file == '' && inputs.acceptance-test-type == 'core-api'
+      if: inputs.suite != 'litmus' && inputs.expected-failures-file == '' && inputs.acceptance-test-type == 'core-api'
       shell: bash
       working-directory: ${{ github.workspace }}
       run: |
@@ -49,6 +136,7 @@ runs:
         echo "EXPECTED_FAILURES_AUTO=/tmp/expected-failures-auto.md" >> "$GITHUB_ENV"
 
     - name: Run ${{ inputs.suite }}
+      if: inputs.suite != 'litmus'
       shell: bash
       working-directory: ${{ github.workspace }}
       env:
