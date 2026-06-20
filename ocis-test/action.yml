@@ -104,6 +104,19 @@ runs:
         echo "All litmus tests passed."
 
     # =========================================================================
+    # cs3api validator (suite: cs3api)
+    # =========================================================================
+    - name: Run cs3api validator
+      if: inputs.suite == 'cs3api'
+      shell: bash
+      run: |
+        docker run --rm --network host \
+          --entrypoint /usr/bin/cs3api-validator \
+          owncloud/cs3api-validator:0.2.1 \
+          /var/lib/cs3api-validator \
+          --endpoint="localhost:9142"
+
+    # =========================================================================
     # WOPI validator tests (suite: wopi-builtin or wopi-cs3)
     # =========================================================================
     - name: Prepare WOPI test file and extract tokens
@@ -193,7 +206,7 @@ runs:
     # Behat acceptance tests (all other suites)
     # =========================================================================
     - name: Merge expected failures files
-      if: "!startsWith(inputs.suite, 'litmus') && !startsWith(inputs.suite, 'wopi-') && inputs.expected-failures-file == '' && inputs.acceptance-test-type != 'core-api'"
+      if: "!startsWith(inputs.suite, 'litmus') && !startsWith(inputs.suite, 'wopi-') && inputs.suite != 'cs3api' && inputs.expected-failures-file == '' && inputs.acceptance-test-type != 'core-api'"
       shell: bash
       working-directory: ${{ github.workspace }}
       run: |
@@ -203,7 +216,7 @@ runs:
         echo "EXPECTED_FAILURES_AUTO=/tmp/expected-failures-auto.md" >> "$GITHUB_ENV"
 
     - name: Merge core-api expected failures files
-      if: "!startsWith(inputs.suite, 'litmus') && !startsWith(inputs.suite, 'wopi-') && inputs.expected-failures-file == '' && inputs.acceptance-test-type == 'core-api'"
+      if: "!startsWith(inputs.suite, 'litmus') && !startsWith(inputs.suite, 'wopi-') && inputs.suite != 'cs3api' && inputs.expected-failures-file == '' && inputs.acceptance-test-type == 'core-api'"
       shell: bash
       working-directory: ${{ github.workspace }}
       run: |
@@ -211,7 +224,7 @@ runs:
         echo "EXPECTED_FAILURES_AUTO=/tmp/expected-failures-auto.md" >> "$GITHUB_ENV"
 
     - name: Run ${{ inputs.suite }}
-      if: "!startsWith(inputs.suite, 'litmus') && !startsWith(inputs.suite, 'wopi-')"
+      if: "!startsWith(inputs.suite, 'litmus') && !startsWith(inputs.suite, 'wopi-') && inputs.suite != 'cs3api'"
       shell: bash
       working-directory: ${{ github.workspace }}
       env:
