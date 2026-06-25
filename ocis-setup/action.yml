@@ -463,7 +463,7 @@ runs:
         echo "All WOPI apps ready."
 
     - name: Start collaboration services
-      if: "inputs.collaboration-apps != '' && !contains(inputs.collaboration-apps, 'cs3-wopi')"
+      if: "inputs.collaboration-apps != ''"
       shell: bash
       env:
         COLLAB_APPS: ${{ inputs.collaboration-apps }}
@@ -472,7 +472,7 @@ runs:
         CONFIG_DIR="${HOME}/.ocis/config"
 
         start_collab() {
-          local name=$1 app_name=$2 product=$3 addr=$4 grpc=$5 http=$6 debug=$7
+          local name=$1 app_name=$2 product=$3 addr=$4 grpc=$5 http=$6 debug=$7 wopi_src=${8:-}
           env \
             OCIS_URL="$OCIS_URL" \
             OCIS_CONFIG_DIR="$CONFIG_DIR" \
@@ -490,7 +490,7 @@ runs:
             COLLABORATION_APP_NAME="$app_name" \
             COLLABORATION_APP_PRODUCT="$product" \
             COLLABORATION_APP_ADDR="$addr" \
-            COLLABORATION_WOPI_SRC="http://localhost:${http}" \
+            COLLABORATION_WOPI_SRC="${wopi_src:-http://localhost:${http}}" \
             ocis collaboration server > "/tmp/collab-${name}.log" 2>&1 &
           echo $! > "/tmp/collab-${name}.pid"
           echo "collaboration-${name} started (PID $!)"
@@ -499,11 +499,13 @@ runs:
         [[ "$COLLAB_APPS" == *collabora*  ]] && start_collab collabora  Collabora  Collabora  "https://localhost:9980" 9301 9300 9304
         [[ "$COLLAB_APPS" == *onlyoffice* ]] && start_collab onlyoffice OnlyOffice OnlyOffice "https://localhost:443"  9311 9310 9314
         [[ "$COLLAB_APPS" == *fakeoffice* ]] && start_collab fakeoffice FakeOffice Microsoft  "http://localhost:8080"  9321 9320 9324
+        # cs3-wopi: oCIS collaboration service points FakeOffice as the app but routes WOPI through cs3org/wopiserver on :9300
+        [[ "$COLLAB_APPS" == *cs3-wopi*   ]] && start_collab cs3-wopi   FakeOffice Microsoft  "http://localhost:8080"  9321 9320 9324 "http://localhost:9300"
 
         PIDS=()
-        for name in collabora onlyoffice fakeoffice; do
+        for name in collabora onlyoffice fakeoffice cs3-wopi; do
           [[ "$COLLAB_APPS" != *$name* ]] && continue
-          port=$(case $name in collabora) echo 9304;; onlyoffice) echo 9314;; fakeoffice) echo 9324;; esac)
+          port=$(case $name in collabora) echo 9304;; onlyoffice) echo 9314;; fakeoffice) echo 9324;; cs3-wopi) echo 9324;; esac)
           ( echo "Waiting for collaboration-${name} healthz on :${port}..."
             timeout 300 bash -c "until curl -sf http://localhost:${port}/healthz; do sleep 2; done" \
               || (echo "=== collab-${name} log ===" && tail -30 /tmp/collab-${name}.log && exit 1) ) &
@@ -511,7 +513,7 @@ runs:
         done
         for PID in "${PIDS[@]}"; do wait "$PID" || exit 1; done
         echo "All collaboration services ready."
-        echo "WOPI_PORT=9320" >> "$GITHUB_ENV"
+        [[ "$COLLAB_APPS" == *cs3-wopi* ]] || echo "WOPI_PORT=9320" >> "$GITHUB_ENV"
 
     # -------------------------------------------------------------------------
     # 13. cs3-wopi: cs3org/wopiserver + fakeoffice (via collaboration-apps: cs3-wopi)
