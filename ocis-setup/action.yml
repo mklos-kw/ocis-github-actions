@@ -263,9 +263,9 @@ runs:
         ANTIVIRUS: ${{ inputs.antivirus }}
         TIKA:      ${{ inputs.tika }}
       run: |
-        [[ "$EMAIL"     != "true" ]] || docker run -d --name mailpit --network host axllent/mailpit:v1.22.3
-        [[ "$ANTIVIRUS" != "true" ]] || docker run -d --name clamav  --network host owncloudci/clamavd
-        [[ "$TIKA"      != "true" ]] || docker run -d --name tika    --network host apache/tika:3.2.2.0-full
+        if [[ "$EMAIL"     == "true" ]]; then docker run -d --name mailpit --network host axllent/mailpit:v1.22.3; fi
+        if [[ "$ANTIVIRUS" == "true" ]]; then docker run -d --name clamav  --network host owncloudci/clamavd;      fi
+        if [[ "$TIKA"      == "true" ]]; then docker run -d --name tika    --network host apache/tika:3.2.2.0-full; fi
         PIDS=()
         [[ "$EMAIL" == "true" ]] && {
           ( timeout 60  bash -c 'until curl -sf http://localhost:8025/api/v1/messages; do sleep 1; done' \
