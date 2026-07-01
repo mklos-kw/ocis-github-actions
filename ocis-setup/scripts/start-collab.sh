@@ -6,7 +6,7 @@ start_collab() {
     OCIS_URL="$OCIS_URL" \
     OCIS_CONFIG_DIR="$CONFIG_DIR" \
     MICRO_REGISTRY=nats-js-kv \
-    MICRO_REGISTRY_ADDRESS="localhost:9233" \
+    MICRO_REGISTRY_ADDRESS="localhost:$((9233 + ${DEBUG_PORT_OFFSET:-0}))" \
     COLLABORATION_LOG_LEVEL=debug \
     COLLABORATION_GRPC_ADDR="0.0.0.0:${grpc}" \
     COLLABORATION_HTTP_ADDR="0.0.0.0:${http}" \
