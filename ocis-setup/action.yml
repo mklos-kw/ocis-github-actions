@@ -330,6 +330,22 @@ runs:
         echo "WEB_UI_CONFIG_FILE=${CONFIG_DIR}/web-ui-config.json" >> "$GITHUB_ENV"
 
     # -------------------------------------------------------------------------
+    # 8b. cs3-wopi: start FakeOffice before oCIS (app-provider probes discovery at startup)
+    # -------------------------------------------------------------------------
+    - name: Start FakeOffice (cs3-wopi early start)
+      if: contains(inputs.collaboration-apps, 'cs3-wopi')
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      run: |
+        docker run -d --name fakeoffice --network host \
+          -v "$(pwd):/ocis:ro" \
+          python:3-alpine \
+          python3 /ocis/tests/config/ci/fakeoffice-server.py
+        echo "Waiting for FakeOffice discovery on :8080..."
+        timeout 120 bash -c 'until curl -sf http://localhost:8080/hosting/discovery; do sleep 2; done'
+        echo "FakeOffice ready."
+
+    # -------------------------------------------------------------------------
     # 9. Start oCIS via ociswrapper (or directly when wrapper: false)
     # -------------------------------------------------------------------------
     - name: Start oCIS
@@ -402,7 +418,7 @@ runs:
     # 12. Optional WOPI collaboration apps
     # -------------------------------------------------------------------------
     - name: Start FakeOffice
-      if: contains(inputs.collaboration-apps, 'fakeoffice') || contains(inputs.collaboration-apps, 'cs3-wopi')
+      if: contains(inputs.collaboration-apps, 'fakeoffice')
       shell: bash
       working-directory: ${{ github.workspace }}
       run: |
