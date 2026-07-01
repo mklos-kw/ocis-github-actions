@@ -140,7 +140,7 @@ fi
 # Shift all service ports by an offset (used when running a secondary oCIS instance alongside the primary)
 if [[ -n "${DEBUG_PORT_OFFSET:-}" && "${DEBUG_PORT_OFFSET}" != "0" ]]; then
   for key in "${!SERVER_ENV[@]}"; do
-    [[ "$key" != *_ADDR ]] && continue
+    [[ "$key" != *_ADDR && "$key" != *_ADDRESS ]] && continue
     val="${SERVER_ENV[$key]}"
     # Only shift host:port values (must contain a colon with a numeric port after it)
     [[ "$val" != *:* ]] && continue
@@ -151,16 +151,11 @@ if [[ -n "${DEBUG_PORT_OFFSET:-}" && "${DEBUG_PORT_OFFSET}" != "0" ]]; then
   done
 fi
 
-# Extra env vars from JSON input — use null-delimited records to handle values with '=' or newlines
+# Extra env vars from JSON input — use jq to parse, SOH-separated key/value pairs
 if [[ -n "${EXTRA_SERVER_ENV:-}" && "${EXTRA_SERVER_ENV}" != "{}" ]]; then
-  while IFS=$'\x01' read -r -d $'\x00' key val; do
-    SERVER_ENV["$key"]="$val"
-  done < <(echo "$EXTRA_SERVER_ENV" | python3 -c "
-import sys, json
-d = json.load(sys.stdin)
-for k, v in d.items():
-    sys.stdout.buffer.write(k.encode() + b'\x01' + v.encode() + b'\x00')
-")
+  while IFS=$'\x01' read -r key val; do
+    [[ -n "$key" ]] && SERVER_ENV["$key"]="$val"
+  done < <(echo "$EXTRA_SERVER_ENV" | jq -r 'to_entries[] | .key + "" + (.value | tostring)')
 fi
 
 DIRECT_MODE=false
