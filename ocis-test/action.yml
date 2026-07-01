@@ -132,10 +132,10 @@ runs:
           "${OCIS_URL}/remote.php/webdav/test.wopitest" \
           -D /tmp/wopi-headers.txt
 
-        FILE_ID=$(grep -i 'Oc-Fileid:' /tmp/wopi-headers.txt | sed 's/.*: *//' | tr -d '\r\n ')
+        FILE_ID=$(grep -i 'Oc-Fileid:' /tmp/wopi-headers.txt | sed 's/.*: *//' | tr -d '\r\n\t ')
         echo "FILE_ID=${FILE_ID}"
 
-        FILE_ID_ENC=$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1], safe=''))" "${FILE_ID}")
+        FILE_ID_ENC=$(jq -rn --arg v "$FILE_ID" '$v | @uri')
 
         OPEN=$(curl -sk -uadmin:admin -X POST --fail \
           --retry-connrefused --retry 7 --retry-all-errors \
@@ -148,9 +148,11 @@ runs:
 
         # Extract encoded file ID from app_url, fall back to re-encoding FILE_ID
         if echo "$APP_URL" | grep -q 'files%2F'; then
-          FILE_ID_ENC=$(echo "$APP_URL" | sed 's/.*files%2F//')
+          FILE_ID_ENC=$(echo "$APP_URL" | sed 's/.*files%2F//' | cut -d'?' -f1)
         elif echo "$APP_URL" | grep -q 'files/'; then
-          FILE_ID_ENC=$(echo "$APP_URL" | sed 's/.*files\///')
+          FILE_ID_ENC=$(echo "$APP_URL" | sed 's/.*files\///' | cut -d'?' -f1)
+        elif [[ -n "$APP_URL" ]]; then
+          echo "WARNING: unrecognized APP_URL format: $APP_URL" >&2
         fi
 
         # WOPI_PORT is exported by ocis-setup (9320 for fakeoffice/builtin, 9300 for cs3-wopi)
@@ -204,8 +206,10 @@ runs:
       if: "!startsWith(inputs.suite, 'litmus') && !startsWith(inputs.suite, 'wopi-') && inputs.suite != 'cs3api' && inputs.expected-failures-file == ''"
       shell: bash
       working-directory: ${{ github.workspace }}
+      env:
+        ACCEPTANCE_TEST_TYPE: ${{ inputs.acceptance-test-type }}
       run: |
-        if [[ "${{ inputs.acceptance-test-type }}" == "core-api" ]]; then
+        if [[ "$ACCEPTANCE_TEST_TYPE" == "core-api" ]]; then
           cp tests/acceptance/expected-failures-API-on-OCIS-storage.md /tmp/expected-failures-auto.md
         else
           cat tests/acceptance/expected-failures-localAPI-on-OCIS-storage.md \
