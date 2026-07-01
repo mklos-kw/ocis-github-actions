@@ -1,11 +1,18 @@
 #!/usr/bin/env bash
 # Usage: start_collab <name> <app_name> <product> <addr> <grpc_port> <http_port> <debug_port> [wopi_src]
 start_collab() {
-  local name=$1 app_name=$2 product=$3 addr=$4 grpc=$5 http=$6 debug=$7 wopi_src=${8:-}
+  local name=$1
+  local app_name=$2
+  local product=$3
+  local addr=$4
+  local grpc=$5
+  local http=$6
+  local debug=$7
+  local wopi_src=${8:-}
   env \
     OCIS_URL="$OCIS_URL" \
     OCIS_CONFIG_DIR="$CONFIG_DIR" \
-    MICRO_REGISTRY=nats-js-kv \
+    MICRO_REGISTRY="nats-js-kv" \
     MICRO_REGISTRY_ADDRESS="localhost:$((9233 + ${DEBUG_PORT_OFFSET:-0}))" \
     COLLABORATION_LOG_LEVEL=debug \
     COLLABORATION_GRPC_ADDR="0.0.0.0:${grpc}" \
