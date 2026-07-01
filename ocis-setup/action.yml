@@ -103,10 +103,6 @@ inputs:
     description: Bind oCIS to the Docker bridge IP so containers can reach it; exports OCIS_BRIDGE_IP and OCIS_DOCKER_URL
     required: false
     default: "false"
-  cs3-wopi-server:
-    description: "Deprecated: use collaboration-apps: cs3-wopi instead"
-    required: false
-    default: "false"
   keycloak-realm-file:
     description: Path (relative to repo root) to the Keycloak realm dist JSON; only used when keycloak=true
     required: false
@@ -143,12 +139,15 @@ runs:
         name: ${{ inputs.ociswrapper-artifact }}
         path: /usr/local/bin
 
-    - name: Mark downloaded binaries executable
-      if: inputs.ocis-binary-artifact != '' || (inputs.ociswrapper-artifact != '' && inputs.wrapper != 'false')
+    - name: Mark oCIS binary executable
+      if: inputs.ocis-binary-artifact != ''
       shell: bash
-      run: |
-        [[ -n "${{ inputs.ocis-binary-artifact }}" ]] && chmod +x ocis/bin/ocis || true
-        [[ -n "${{ inputs.ociswrapper-artifact }}" && "${{ inputs.wrapper }}" != "false" ]] && chmod +x /usr/local/bin/ociswrapper || true
+      run: chmod +x ocis/bin/ocis
+
+    - name: Mark ociswrapper executable
+      if: inputs.ociswrapper-artifact != '' && inputs.wrapper != 'false'
+      shell: bash
+      run: chmod +x /usr/local/bin/ociswrapper
 
     # -------------------------------------------------------------------------
     # 1. Install oCIS binary (skip when a pre-built binary is provided)
@@ -208,6 +207,13 @@ runs:
         OCIS_URL: ${{ inputs.ocis-url }}
         REALM_DIST: ${{ inputs.keycloak-realm-file }}
       run: |
+        # Start Postgres early so its pull/boot overlaps with cert generation
+        docker run -d --name postgres --network host \
+          -e POSTGRES_DB=keycloak \
+          -e POSTGRES_USER=keycloak \
+          -e POSTGRES_PASSWORD=keycloak \
+          postgres:alpine3.18
+
         # Generate TLS cert with SAN so Chromium hostname-validates it
         mkdir -p keycloak-certs
         openssl req -x509 -newkey rsa:2048 \
@@ -221,12 +227,6 @@ runs:
         # Patch realm file: replace placeholder domain with actual oCIS URL
         sed "s|https://ocis-server:9200|${OCIS_URL}|g" "${REALM_DIST}" > /tmp/ocis-realm.json
 
-        # Start Postgres (Keycloak backend)
-        docker run -d --name postgres --network host \
-          -e POSTGRES_DB=keycloak \
-          -e POSTGRES_USER=keycloak \
-          -e POSTGRES_PASSWORD=keycloak \
-          postgres:alpine3.18
         timeout 30 bash -c 'until docker exec postgres pg_isready -U keycloak; do sleep 1; done'
 
         # Start Keycloak
@@ -249,7 +249,7 @@ runs:
           start-dev --proxy-headers xforwarded \
             --spi-connections-http-client-default-disable-trust-manager=true \
             --import-realm --health-enabled=true
-        timeout 300 bash -c 'until curl -skf https://localhost:9000/health/ready; do sleep 3; done' \
+        timeout 300 bash -c 'until curl -skf https://localhost:9000/health/ready; do sleep 5; done' \
           || (echo "=== keycloak logs ===" && docker logs keycloak --tail 80 && exit 1)
         echo "keycloak ready."
 
@@ -258,30 +258,31 @@ runs:
         sudo update-ca-certificates
         echo "KEYCLOAK_CERT=$(pwd)/keycloak-certs/keycloakcrt.pem" >> "$GITHUB_ENV"
 
-    - name: Start Mailpit (email)
-      if: inputs.email == 'true'
+    - name: Start optional services
+      if: inputs.email == 'true' || inputs.antivirus == 'true' || inputs.tika == 'true'
       shell: bash
       run: |
-        docker run -d --name mailpit --network host axllent/mailpit:v1.22.3
-        timeout 60 bash -c 'until curl -sf http://localhost:8025/api/v1/messages; do sleep 1; done'
-        echo "mailpit ready."
-
-    - name: Start ClamAV (antivirus)
-      if: inputs.antivirus == 'true'
-      shell: bash
-      run: |
-        docker run -d --name clamav --network host owncloudci/clamavd
-        echo "Waiting for ClamAV on :3310 (may take up to 5 min for virus DB download)..."
-        timeout 300 bash -c 'until nc -z localhost 3310 2>/dev/null; do sleep 2; done'
-        echo "clamav ready."
-
-    - name: Start Tika (full-text search)
-      if: inputs.tika == 'true'
-      shell: bash
-      run: |
-        docker run -d --name tika --network host apache/tika:3.2.2.0-full
-        timeout 120 bash -c 'until curl -sf http://localhost:9998; do sleep 2; done'
-        echo "tika ready."
+        [[ "${{ inputs.email }}"     == "true" ]] && docker run -d --name mailpit --network host axllent/mailpit:v1.22.3
+        [[ "${{ inputs.antivirus }}" == "true" ]] && docker run -d --name clamav  --network host owncloudci/clamavd
+        [[ "${{ inputs.tika }}"      == "true" ]] && docker run -d --name tika    --network host apache/tika:3.2.2.0-full
+        PIDS=()
+        [[ "${{ inputs.email }}"     == "true" ]] && {
+          ( timeout 60  bash -c 'until curl -sf http://localhost:8025/api/v1/messages; do sleep 1; done'
+            echo "mailpit ready." ) &
+          PIDS+=($!)
+        }
+        [[ "${{ inputs.antivirus }}" == "true" ]] && {
+          echo "Waiting for ClamAV on :3310 (may take up to 5 min for virus DB download)..."
+          ( timeout 300 bash -c 'until nc -z localhost 3310 2>/dev/null; do sleep 2; done'
+            echo "clamav ready." ) &
+          PIDS+=($!)
+        }
+        [[ "${{ inputs.tika }}"      == "true" ]] && {
+          ( timeout 120 bash -c 'until curl -sf http://localhost:9998; do sleep 2; done'
+            echo "tika ready." ) &
+          PIDS+=($!)
+        }
+        for PID in "${PIDS[@]}"; do wait "$PID" || exit 1; done
 
     # -------------------------------------------------------------------------
     # 4. Install test-runner dependencies (skipped for secondary instances)
@@ -558,32 +559,8 @@ runs:
         COLLAB_APPS: ${{ inputs.collaboration-apps }}
         OCIS_URL: ${{ inputs.ocis-url }}
       run: |
+        source "${{ github.action_path }}/scripts/start-collab.sh"
         CONFIG_DIR="${HOME}/.ocis/config"
-
-        start_collab() {
-          local name=$1 app_name=$2 product=$3 addr=$4 grpc=$5 http=$6 debug=$7 wopi_src=${8:-}
-          env \
-            OCIS_URL="$OCIS_URL" \
-            OCIS_CONFIG_DIR="$CONFIG_DIR" \
-            MICRO_REGISTRY=nats-js-kv \
-            MICRO_REGISTRY_ADDRESS="localhost:9233" \
-            COLLABORATION_LOG_LEVEL=debug \
-            COLLABORATION_GRPC_ADDR="0.0.0.0:${grpc}" \
-            COLLABORATION_HTTP_ADDR="0.0.0.0:${http}" \
-            COLLABORATION_DEBUG_ADDR="0.0.0.0:${debug}" \
-            COLLABORATION_APP_PROOF_DISABLE=true \
-            COLLABORATION_APP_INSECURE=true \
-            COLLABORATION_CS3API_DATAGATEWAY_INSECURE=true \
-            OCIS_JWT_SECRET=some-ocis-jwt-secret \
-            COLLABORATION_WOPI_SECRET=some-wopi-secret \
-            COLLABORATION_APP_NAME="$app_name" \
-            COLLABORATION_APP_PRODUCT="$product" \
-            COLLABORATION_APP_ADDR="$addr" \
-            COLLABORATION_WOPI_SRC="${wopi_src:-http://localhost:${http}}" \
-            ocis collaboration server > "/tmp/collab-${name}.log" 2>&1 &
-          echo $! > "/tmp/collab-${name}.pid"
-          echo "collaboration-${name} started (PID $!)"
-        }
 
         [[ "$COLLAB_APPS" == *collabora*  ]] && start_collab collabora  Collabora  Collabora  "https://localhost:9980" 9301 9300 9304
         [[ "$COLLAB_APPS" == *onlyoffice* ]] && start_collab onlyoffice OnlyOffice OnlyOffice "https://localhost:443"  9311 9310 9314
