@@ -499,13 +499,12 @@ runs:
         [[ "$COLLAB_APPS" == *collabora*  ]] && start_collab collabora  Collabora  Collabora  "https://localhost:9980" 9301 9300 9304
         [[ "$COLLAB_APPS" == *onlyoffice* ]] && start_collab onlyoffice OnlyOffice OnlyOffice "https://localhost:443"  9311 9310 9314
         [[ "$COLLAB_APPS" == *fakeoffice* ]] && start_collab fakeoffice FakeOffice Microsoft  "http://localhost:8080"  9321 9320 9324
-        # cs3-wopi: oCIS collaboration service points FakeOffice as the app but routes WOPI through cs3org/wopiserver on :9300
-        [[ "$COLLAB_APPS" == *cs3-wopi*   ]] && start_collab cs3-wopi   FakeOffice Microsoft  "http://localhost:8080"  9321 9320 9324 "http://localhost:9300"
+        # cs3-wopi uses app-provider (legacy arch) + cs3org/wopiserver — no collaboration service needed
 
         PIDS=()
-        for name in collabora onlyoffice fakeoffice cs3-wopi; do
+        for name in collabora onlyoffice fakeoffice; do
           [[ "$COLLAB_APPS" != *$name* ]] && continue
-          port=$(case $name in collabora) echo 9304;; onlyoffice) echo 9314;; fakeoffice) echo 9324;; cs3-wopi) echo 9324;; esac)
+          port=$(case $name in collabora) echo 9304;; onlyoffice) echo 9314;; fakeoffice) echo 9324;; esac)
           ( echo "Waiting for collaboration-${name} healthz on :${port}..."
             timeout 300 bash -c "until curl -sf http://localhost:${port}/healthz; do sleep 2; done" \
               || (echo "=== collab-${name} log ===" && tail -30 /tmp/collab-${name}.log && exit 1) ) &
