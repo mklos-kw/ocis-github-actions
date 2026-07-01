@@ -107,6 +107,22 @@ jobs:
           suite: apiGraph
 ```
 
+**Unit tests (no oCIS instance needed):**
+
+```yaml
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Run unit tests
+        run: make test
+```
+
 **e2e tests with Keycloak:**
 
 ```yaml
