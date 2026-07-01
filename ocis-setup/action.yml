@@ -139,11 +139,6 @@ runs:
         name: ${{ inputs.ociswrapper-artifact }}
         path: /usr/local/bin
 
-    - name: Mark oCIS binary executable
-      if: inputs.ocis-binary-artifact != ''
-      shell: bash
-      run: chmod +x ocis/bin/ocis
-
     - name: Mark ociswrapper executable
       if: inputs.ociswrapper-artifact != '' && inputs.wrapper != 'false'
       shell: bash
@@ -261,25 +256,29 @@ runs:
     - name: Start optional services
       if: inputs.email == 'true' || inputs.antivirus == 'true' || inputs.tika == 'true'
       shell: bash
+      env:
+        EMAIL:     ${{ inputs.email }}
+        ANTIVIRUS: ${{ inputs.antivirus }}
+        TIKA:      ${{ inputs.tika }}
       run: |
-        [[ "${{ inputs.email }}"     == "true" ]] && docker run -d --name mailpit --network host axllent/mailpit:v1.22.3
-        [[ "${{ inputs.antivirus }}" == "true" ]] && docker run -d --name clamav  --network host owncloudci/clamavd
-        [[ "${{ inputs.tika }}"      == "true" ]] && docker run -d --name tika    --network host apache/tika:3.2.2.0-full
+        [[ "$EMAIL"     == "true" ]] && docker run -d --name mailpit --network host axllent/mailpit:v1.22.3
+        [[ "$ANTIVIRUS" == "true" ]] && docker run -d --name clamav  --network host owncloudci/clamavd
+        [[ "$TIKA"      == "true" ]] && docker run -d --name tika    --network host apache/tika:3.2.2.0-full
         PIDS=()
-        [[ "${{ inputs.email }}"     == "true" ]] && {
-          ( timeout 60  bash -c 'until curl -sf http://localhost:8025/api/v1/messages; do sleep 1; done'
-            echo "mailpit ready." ) &
+        [[ "$EMAIL" == "true" ]] && {
+          ( timeout 60  bash -c 'until curl -sf http://localhost:8025/api/v1/messages; do sleep 1; done' \
+            && echo "mailpit ready." ) &
           PIDS+=($!)
         }
-        [[ "${{ inputs.antivirus }}" == "true" ]] && {
+        [[ "$ANTIVIRUS" == "true" ]] && {
           echo "Waiting for ClamAV on :3310 (may take up to 5 min for virus DB download)..."
-          ( timeout 300 bash -c 'until nc -z localhost 3310 2>/dev/null; do sleep 2; done'
-            echo "clamav ready." ) &
+          ( timeout 300 bash -c 'until nc -z localhost 3310 2>/dev/null; do sleep 2; done' \
+            && echo "clamav ready." ) &
           PIDS+=($!)
         }
-        [[ "${{ inputs.tika }}"      == "true" ]] && {
-          ( timeout 120 bash -c 'until curl -sf http://localhost:9998; do sleep 2; done'
-            echo "tika ready." ) &
+        [[ "$TIKA" == "true" ]] && {
+          ( timeout 120 bash -c 'until curl -sf http://localhost:9998; do sleep 2; done' \
+            && echo "tika ready." ) &
           PIDS+=($!)
         }
         for PID in "${PIDS[@]}"; do wait "$PID" || exit 1; done
@@ -287,14 +286,6 @@ runs:
     # -------------------------------------------------------------------------
     # 4. Install test-runner dependencies (skipped for secondary instances)
     # -------------------------------------------------------------------------
-    - name: Install libcurl 8.12.0 build dependencies
-      if: inputs.skip-test-runner-setup != 'true'
-      shell: bash
-      run: |
-        sudo apt-get update -qq
-        sudo NEEDRESTART_MODE=a apt-get install -y \
-          libssl-dev libnghttp2-dev libpsl-dev libldap-dev libssh-dev zlib1g-dev libvips-dev
-
     - name: Cache libcurl 8.12.0
       if: inputs.skip-test-runner-setup != 'true'
       id: cache-libcurl
@@ -302,6 +293,14 @@ runs:
       with:
         path: /opt/libcurl
         key: libcurl-8.12.0-${{ runner.os }}
+
+    - name: Install libcurl 8.12.0 build dependencies
+      if: inputs.skip-test-runner-setup != 'true' && steps.cache-libcurl.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        sudo apt-get update -qq
+        sudo NEEDRESTART_MODE=a apt-get install -y \
+          libssl-dev libnghttp2-dev libpsl-dev libldap-dev libssh-dev zlib1g-dev libvips-dev
 
     - name: Compile libcurl 8.12.0 from source
       if: inputs.skip-test-runner-setup != 'true' && steps.cache-libcurl.outputs.cache-hit != 'true'
@@ -421,12 +420,15 @@ runs:
     - name: Start Collabora (early — overlaps with oCIS boot)
       if: contains(inputs.collaboration-apps, 'collabora')
       shell: bash
+      env:
+        COLLABORA_IMAGE: ${{ inputs.collabora-image }}
+        OCIS_URL:        ${{ inputs.ocis-url }}
       run: |
         docker run -d --name collabora --network host \
           -e DONT_GEN_SSL_CERT=set \
-          -e "extra_params=--o:ssl.enable=true --o:ssl.termination=true --o:welcome.enable=false --o:net.frame_ancestors=${{ inputs.ocis-url }}" \
+          -e "extra_params=--o:ssl.enable=true --o:ssl.termination=true --o:welcome.enable=false --o:net.frame_ancestors=${OCIS_URL}" \
           --entrypoint /bin/sh \
-          ${{ inputs.collabora-image }} \
+          "${COLLABORA_IMAGE}" \
           -c "set -e; coolconfig generate-proof-key; bash /start-collabora-online.sh"
 
     - name: Start OnlyOffice (early — overlaps with oCIS boot)
@@ -517,7 +519,7 @@ runs:
     # 12. Start fakeoffice (non-cs3-wopi path) + wait for all discovery endpoints
     # -------------------------------------------------------------------------
     - name: Start FakeOffice
-      if: contains(inputs.collaboration-apps, 'fakeoffice')
+      if: contains(inputs.collaboration-apps, 'fakeoffice') && !contains(inputs.collaboration-apps, 'cs3-wopi')
       shell: bash
       working-directory: ${{ github.workspace }}
       run: |
@@ -534,7 +536,7 @@ runs:
       run: |
         PIDS=()
         # cs3-wopi FakeOffice was already confirmed healthy in step 8b; skip re-check
-        [[ "$COLLAB_APPS" == *fakeoffice* ]] && {
+        [[ "$COLLAB_APPS" == *fakeoffice* && "$COLLAB_APPS" != *cs3-wopi* ]] && {
           ( timeout 300 bash -c 'until curl -sf http://localhost:8080/hosting/discovery; do sleep 2; done'
             echo "fakeoffice ready." ) &
           PIDS+=($!)
@@ -556,11 +558,13 @@ runs:
       if: "inputs.collaboration-apps != ''"
       shell: bash
       env:
-        COLLAB_APPS: ${{ inputs.collaboration-apps }}
-        OCIS_URL: ${{ inputs.ocis-url }}
+        COLLAB_APPS:           ${{ inputs.collaboration-apps }}
+        OCIS_URL:              ${{ inputs.ocis-url }}
+        OCIS_CONFIG_DIR_INPUT: ${{ inputs.ocis-config-dir }}
+        ACTION_PATH:           ${{ github.action_path }}
       run: |
-        source "${{ github.action_path }}/scripts/start-collab.sh"
-        CONFIG_DIR="${HOME}/.ocis/config"
+        source "${ACTION_PATH}/scripts/start-collab.sh"
+        CONFIG_DIR="${OCIS_CONFIG_DIR_INPUT:-${HOME}/.ocis/config}"
 
         [[ "$COLLAB_APPS" == *collabora*  ]] && start_collab collabora  Collabora  Collabora  "https://localhost:9980" 9301 9300 9304
         [[ "$COLLAB_APPS" == *onlyoffice* ]] && start_collab onlyoffice OnlyOffice OnlyOffice "https://localhost:443"  9311 9310 9314
@@ -578,7 +582,13 @@ runs:
         done
         for PID in "${PIDS[@]}"; do wait "$PID" || exit 1; done
         echo "All collaboration services ready."
-        [[ "$COLLAB_APPS" == *cs3-wopi* ]] || echo "WOPI_PORT=9320" >> "$GITHUB_ENV"
+        # Set WOPI_PORT for the active collaboration app (cs3-wopi sets its own in step 13)
+        if [[ "$COLLAB_APPS" != *cs3-wopi* ]]; then
+          if   [[ "$COLLAB_APPS" == *fakeoffice* ]]; then echo "WOPI_PORT=9320" >> "$GITHUB_ENV"
+          elif [[ "$COLLAB_APPS" == *collabora*  ]]; then echo "WOPI_PORT=9300" >> "$GITHUB_ENV"
+          elif [[ "$COLLAB_APPS" == *onlyoffice* ]]; then echo "WOPI_PORT=9310" >> "$GITHUB_ENV"
+          fi
+        fi
 
     # -------------------------------------------------------------------------
     # 13. cs3-wopi: cs3org/wopiserver + fakeoffice (via collaboration-apps: cs3-wopi)
