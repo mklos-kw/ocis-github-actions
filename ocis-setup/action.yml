@@ -157,8 +157,10 @@ runs:
     - name: Use pre-built oCIS binary
       if: inputs.ocis-binary != '' && inputs.ocis-binary-artifact == ''
       shell: bash
+      env:
+        OCIS_BINARY: ${{ inputs.ocis-binary }}
       run: |
-        sudo install -m 0755 "${{ inputs.ocis-binary }}" /usr/local/bin/ocis
+        sudo install -m 0755 "${OCIS_BINARY}" /usr/local/bin/ocis
         echo "Using pre-built oCIS: $(ocis --version 2>&1 | head -1)"
 
     - name: Install artifact oCIS binary system-wide
@@ -261,9 +263,9 @@ runs:
         ANTIVIRUS: ${{ inputs.antivirus }}
         TIKA:      ${{ inputs.tika }}
       run: |
-        [[ "$EMAIL"     == "true" ]] && docker run -d --name mailpit --network host axllent/mailpit:v1.22.3
-        [[ "$ANTIVIRUS" == "true" ]] && docker run -d --name clamav  --network host owncloudci/clamavd
-        [[ "$TIKA"      == "true" ]] && docker run -d --name tika    --network host apache/tika:3.2.2.0-full
+        [[ "$EMAIL"     != "true" ]] || docker run -d --name mailpit --network host axllent/mailpit:v1.22.3
+        [[ "$ANTIVIRUS" != "true" ]] || docker run -d --name clamav  --network host owncloudci/clamavd
+        [[ "$TIKA"      != "true" ]] || docker run -d --name tika    --network host apache/tika:3.2.2.0-full
         PIDS=()
         [[ "$EMAIL" == "true" ]] && {
           ( timeout 60  bash -c 'until curl -sf http://localhost:8025/api/v1/messages; do sleep 1; done' \
@@ -377,7 +379,7 @@ runs:
         OCIS_ACTION_PATH: ${{ github.action_path }}
         OCIS_URL: ${{ inputs.ocis-url }}
         OCIS_CONFIG_DIR_INPUT: ${{ inputs.ocis-config-dir }}
-      run: ${{ github.action_path }}/scripts/init-ocis.sh
+      run: "${OCIS_ACTION_PATH}/scripts/init-ocis.sh"
 
     # -------------------------------------------------------------------------
     # 8. Patch web UI config (rewrite Docker Compose hostname to CI host)
@@ -435,6 +437,8 @@ runs:
       if: contains(inputs.collaboration-apps, 'onlyoffice')
       shell: bash
       working-directory: ${{ github.workspace }}
+      env:
+        ONLYOFFICE_IMAGE: ${{ inputs.onlyoffice-image }}
       run: |
         sudo systemctl stop postgresql || true
         docker run -d --name onlyoffice --network host \
@@ -443,7 +447,7 @@ runs:
           -v "$(pwd)/tests/config/ci/only-office.json:/tmp/only-office.json:ro" \
           -v "$(pwd)/tests/config/ci/onlyoffice-entrypoint.sh:/entrypoint.sh:ro" \
           --entrypoint /bin/sh \
-          ${{ inputs.onlyoffice-image }} \
+          "${ONLYOFFICE_IMAGE}" \
           /entrypoint.sh
 
     # -------------------------------------------------------------------------
@@ -537,18 +541,18 @@ runs:
         PIDS=()
         # cs3-wopi FakeOffice was already confirmed healthy in step 8b; skip re-check
         [[ "$COLLAB_APPS" == *fakeoffice* && "$COLLAB_APPS" != *cs3-wopi* ]] && {
-          ( timeout 300 bash -c 'until curl -sf http://localhost:8080/hosting/discovery; do sleep 2; done'
-            echo "fakeoffice ready." ) &
+          ( timeout 300 bash -c 'until curl -sf http://localhost:8080/hosting/discovery; do sleep 2; done' \
+            && echo "fakeoffice ready." ) &
           PIDS+=($!)
         }
         [[ "$COLLAB_APPS" == *collabora* ]] && {
-          ( timeout 300 bash -c 'until curl -sfk https://localhost:9980/hosting/discovery; do sleep 2; done'
-            echo "collabora ready." ) &
+          ( timeout 300 bash -c 'until curl -sfk https://localhost:9980/hosting/discovery; do sleep 2; done' \
+            && echo "collabora ready." ) &
           PIDS+=($!)
         }
         [[ "$COLLAB_APPS" == *onlyoffice* ]] && {
-          ( timeout 300 bash -c 'until curl -sfk https://localhost:443/hosting/discovery; do sleep 2; done'
-            echo "onlyoffice ready." ) &
+          ( timeout 300 bash -c 'until curl -sfk https://localhost:443/hosting/discovery; do sleep 2; done' \
+            && echo "onlyoffice ready." ) &
           PIDS+=($!)
         }
         for PID in "${PIDS[@]}"; do wait "$PID" || exit 1; done
@@ -562,18 +566,20 @@ runs:
         OCIS_URL:              ${{ inputs.ocis-url }}
         OCIS_CONFIG_DIR_INPUT: ${{ inputs.ocis-config-dir }}
         ACTION_PATH:           ${{ github.action_path }}
+        DEBUG_PORT_OFFSET:     ${{ inputs.debug-port-offset }}
       run: |
         source "${ACTION_PATH}/scripts/start-collab.sh"
         CONFIG_DIR="${OCIS_CONFIG_DIR_INPUT:-${HOME}/.ocis/config}"
 
         [[ "$COLLAB_APPS" == *collabora*  ]] && start_collab collabora  Collabora  Collabora  "https://localhost:9980" 9301 9300 9304
         [[ "$COLLAB_APPS" == *onlyoffice* ]] && start_collab onlyoffice OnlyOffice OnlyOffice "https://localhost:443"  9311 9310 9314
-        [[ "$COLLAB_APPS" == *fakeoffice* ]] && start_collab fakeoffice FakeOffice Microsoft  "http://localhost:8080"  9321 9320 9324
+        [[ "$COLLAB_APPS" == *fakeoffice* && "$COLLAB_APPS" != *cs3-wopi* ]] && start_collab fakeoffice FakeOffice Microsoft  "http://localhost:8080"  9321 9320 9324
         # cs3-wopi uses app-provider (legacy arch) + cs3org/wopiserver — no collaboration service needed
 
         PIDS=()
         for name in collabora onlyoffice fakeoffice; do
           [[ "$COLLAB_APPS" != *$name* ]] && continue
+          [[ "$name" == "fakeoffice" && "$COLLAB_APPS" == *cs3-wopi* ]] && continue
           port=$(case $name in collabora) echo 9304;; onlyoffice) echo 9314;; fakeoffice) echo 9324;; esac)
           ( echo "Waiting for collaboration-${name} healthz on :${port}..."
             timeout 300 bash -c "until curl -sf http://localhost:${port}/healthz; do sleep 2; done" \
