@@ -201,21 +201,17 @@ runs:
     # Behat acceptance tests (all other suites)
     # =========================================================================
     - name: Merge expected failures files
-      if: "!startsWith(inputs.suite, 'litmus') && !startsWith(inputs.suite, 'wopi-') && inputs.suite != 'cs3api' && inputs.expected-failures-file == '' && inputs.acceptance-test-type != 'core-api'"
+      if: "!startsWith(inputs.suite, 'litmus') && !startsWith(inputs.suite, 'wopi-') && inputs.suite != 'cs3api' && inputs.expected-failures-file == ''"
       shell: bash
       working-directory: ${{ github.workspace }}
       run: |
-        cat tests/acceptance/expected-failures-localAPI-on-OCIS-storage.md \
-            tests/acceptance/expected-failures-without-remotephp.md \
-            > /tmp/expected-failures-auto.md
-        echo "EXPECTED_FAILURES_AUTO=/tmp/expected-failures-auto.md" >> "$GITHUB_ENV"
-
-    - name: Merge core-api expected failures files
-      if: "!startsWith(inputs.suite, 'litmus') && !startsWith(inputs.suite, 'wopi-') && inputs.suite != 'cs3api' && inputs.expected-failures-file == '' && inputs.acceptance-test-type == 'core-api'"
-      shell: bash
-      working-directory: ${{ github.workspace }}
-      run: |
-        cp tests/acceptance/expected-failures-API-on-OCIS-storage.md /tmp/expected-failures-auto.md
+        if [[ "${{ inputs.acceptance-test-type }}" == "core-api" ]]; then
+          cp tests/acceptance/expected-failures-API-on-OCIS-storage.md /tmp/expected-failures-auto.md
+        else
+          cat tests/acceptance/expected-failures-localAPI-on-OCIS-storage.md \
+              tests/acceptance/expected-failures-without-remotephp.md \
+              > /tmp/expected-failures-auto.md
+        fi
         echo "EXPECTED_FAILURES_AUTO=/tmp/expected-failures-auto.md" >> "$GITHUB_ENV"
 
     - name: Run ${{ inputs.suite }}
