@@ -122,7 +122,11 @@ fi
 
 # Email (notifications service)
 if [[ "${EMAIL_ENABLED:-false}" == "true" ]]; then
-  SERVER_ENV[OCIS_ADD_RUN_SERVICES]="${SERVER_ENV[OCIS_ADD_RUN_SERVICES]:+${SERVER_ENV[OCIS_ADD_RUN_SERVICES]},}notifications"
+  if [[ -n "${SERVER_ENV[OCIS_ADD_RUN_SERVICES]:-}" ]]; then
+    SERVER_ENV[OCIS_ADD_RUN_SERVICES]="${SERVER_ENV[OCIS_ADD_RUN_SERVICES]},notifications"
+  else
+    SERVER_ENV[OCIS_ADD_RUN_SERVICES]="notifications"
+  fi
   SERVER_ENV[NOTIFICATIONS_SMTP_HOST]="localhost"
   SERVER_ENV[NOTIFICATIONS_SMTP_PORT]="1025"
   SERVER_ENV[NOTIFICATIONS_SMTP_INSECURE]="true"
@@ -151,7 +155,7 @@ if [[ -n "${DEBUG_PORT_OFFSET:-}" && "${DEBUG_PORT_OFFSET}" != "0" ]]; then
   done
 fi
 
-# Extra env vars from JSON input — use jq to parse, SOH-separated key/value pairs
+# Extra env vars from JSON input — jq outputs KEY\x01VALUE lines (SOH as delimiter: safe against spaces/newlines in values)
 if [[ -n "${EXTRA_SERVER_ENV:-}" && "${EXTRA_SERVER_ENV}" != "{}" ]]; then
   while IFS=$'\x01' read -r key val; do
     [[ -n "$key" ]] && SERVER_ENV["$key"]="$val"
