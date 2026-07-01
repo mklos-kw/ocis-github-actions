@@ -142,9 +142,13 @@ runs:
           "${OCIS_URL}/app/open?app_name=FakeOffice&file_id=${FILE_ID_ENC}")
         echo "open: ${OPEN:0:400}"
 
-        ACCESS_TOKEN=$(echo "$OPEN" | jq -r '.form_parameters.access_token')
-        TTL=$(echo "$OPEN"          | jq -r '.form_parameters.access_token_ttl')
-        APP_URL=$(echo "$OPEN"      | jq -r '.app_url // ""')
+        read -r ACCESS_TOKEN TTL APP_URL < <(
+          echo "$OPEN" | jq -r '[
+            .form_parameters.access_token,
+            (.form_parameters.access_token_ttl | if type == "number" then tostring else "0" end),
+            (.app_url // "")
+          ] | @tsv'
+        )
 
         # Extract encoded file ID from app_url, fall back to re-encoding FILE_ID
         if echo "$APP_URL" | grep -q 'files%2F'; then
