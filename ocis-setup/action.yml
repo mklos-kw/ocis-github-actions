@@ -107,6 +107,10 @@ inputs:
     description: "Deprecated: use collaboration-apps: cs3-wopi instead"
     required: false
     default: "false"
+  keycloak-realm-file:
+    description: Path (relative to repo root) to the Keycloak realm dist JSON; only used when keycloak=true
+    required: false
+    default: tests/config/ci/ocis-ci-realm.dist.json
 
 outputs:
   ocis-url:
@@ -115,6 +119,9 @@ outputs:
   wopi-url:
     description: WOPI source base URL (http://localhost:PORT); only set when collaboration-apps is non-empty
     value: ${{ steps.wopi-url.outputs.wopi-url }}
+  keycloak-domain:
+    description: Keycloak domain (host:port); only set when keycloak=true
+    value: localhost:8443
 
 runs:
   using: composite
@@ -193,6 +200,64 @@ runs:
     # -------------------------------------------------------------------------
     # 3. Optional services
     # -------------------------------------------------------------------------
+    - name: Start Keycloak stack
+      if: inputs.keycloak == 'true'
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      env:
+        OCIS_URL: ${{ inputs.ocis-url }}
+        REALM_DIST: ${{ inputs.keycloak-realm-file }}
+      run: |
+        # Generate TLS cert with SAN so Chromium hostname-validates it
+        mkdir -p keycloak-certs
+        openssl req -x509 -newkey rsa:2048 \
+          -keyout keycloak-certs/keycloakkey.pem \
+          -out keycloak-certs/keycloakcrt.pem \
+          -nodes -days 365 \
+          -subj '/CN=localhost' \
+          -addext 'subjectAltName=DNS:localhost,IP:127.0.0.1'
+        chmod -R 777 keycloak-certs
+
+        # Patch realm file: replace placeholder domain with actual oCIS URL
+        sed "s|https://ocis-server:9200|${OCIS_URL}|g" "${REALM_DIST}" > /tmp/ocis-realm.json
+
+        # Start Postgres (Keycloak backend)
+        docker run -d --name postgres --network host \
+          -e POSTGRES_DB=keycloak \
+          -e POSTGRES_USER=keycloak \
+          -e POSTGRES_PASSWORD=keycloak \
+          postgres:alpine3.18
+        timeout 30 bash -c 'until docker exec postgres pg_isready -U keycloak; do sleep 1; done'
+
+        # Start Keycloak
+        docker run -d --name keycloak --network host \
+          -e "OCIS_DOMAIN=${OCIS_URL}" \
+          -e KC_HOSTNAME=localhost \
+          -e KC_PORT=8443 \
+          -e KC_DB=postgres \
+          -e "KC_DB_URL=jdbc:postgresql://localhost:5432/keycloak" \
+          -e KC_DB_USERNAME=keycloak \
+          -e KC_DB_PASSWORD=keycloak \
+          -e KC_FEATURES=impersonation \
+          -e KC_BOOTSTRAP_ADMIN_USERNAME=admin \
+          -e KC_BOOTSTRAP_ADMIN_PASSWORD=admin \
+          -e KC_HTTPS_CERTIFICATE_FILE=/keycloak-certs/keycloakcrt.pem \
+          -e KC_HTTPS_CERTIFICATE_KEY_FILE=/keycloak-certs/keycloakkey.pem \
+          -v "$(pwd)/keycloak-certs:/keycloak-certs:ro" \
+          -v "/tmp/ocis-realm.json:/opt/keycloak/data/import/oCIS-realm.json:ro" \
+          quay.io/keycloak/keycloak:26.2.5 \
+          start-dev --proxy-headers xforwarded \
+            --spi-connections-http-client-default-disable-trust-manager=true \
+            --import-realm --health-enabled=true
+        timeout 300 bash -c 'until curl -skf https://localhost:9000/health/ready; do sleep 3; done' \
+          || (echo "=== keycloak logs ===" && docker logs keycloak --tail 80 && exit 1)
+        echo "keycloak ready."
+
+        # Trust the cert system-wide (curl + Playwright)
+        sudo cp keycloak-certs/keycloakcrt.pem /usr/local/share/ca-certificates/keycloak.crt
+        sudo update-ca-certificates
+        echo "KEYCLOAK_CERT=$(pwd)/keycloak-certs/keycloakcrt.pem" >> "$GITHUB_ENV"
+
     - name: Start Mailpit (email)
       if: inputs.email == 'true'
       shell: bash
